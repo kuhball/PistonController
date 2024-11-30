@@ -7,14 +7,31 @@ void IRAM_ATTR encoderISR(void* arg) {
     controller->updateEncoder();
 }
 
-PistonController::PistonController(int valvePin1, int valvePin2, int encoderPinA, int encoderPinB)
+// ISR for home signal
+void IRAM_ATTR homeISR(void* arg) {
+    PistonController* controller = (PistonController*)arg;
+    controller->checkHomeSignal();
+}
+
+PistonController::PistonController(
+    int valvePin1, 
+    int valvePin2, 
+    int encoderPinA, 
+    int encoderPinB, 
+    int encoderPinZ, 
+    bool enableDebug
+)
     : _valvePin1(valvePin1)
     , _valvePin2(valvePin2)
     , _encoderPinA(encoderPinA)
     , _encoderPinB(encoderPinB)
+    , _encoderPinZ(encoderPinZ)
     , _currentPosition(0)
     , _targetPosition(0)
     , _currentState(HOLD)
+    , _debugEnabled(enableDebug)
+    , _isReferenced(false)
+    , _homeOffset(0)
 {
 }
 
@@ -28,12 +45,54 @@ void PistonController::begin() {
     // Setup encoder pins
     pinMode(_encoderPinA, INPUT_PULLUP);
     pinMode(_encoderPinB, INPUT_PULLUP);
+    pinMode(_encoderPinZ, INPUT_PULLUP);
     
-    // Attach interrupt for encoder
+    // Attach interrupts for encoder and home signal
     attachInterruptArg(digitalPinToInterrupt(_encoderPinA), encoderISR, this, CHANGE);
     attachInterruptArg(digitalPinToInterrupt(_encoderPinB), encoderISR, this, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(_encoderPinZ), homeISR, this, FALLING);
     
     _lastTime = millis();
+    
+    debugPrint("PistonController initialized. Encoder pins (A,B,Z): ", 
+               String(_encoderPinA) + "," + String(_encoderPinB) + "," + String(_encoderPinZ));
+}
+
+void PistonController::checkHomeSignal() {
+    if (!_isReferenced) {
+        _homeOffset = _currentPosition;
+        _isReferenced = true;
+        debugPrint("Home position found at offset: ", _homeOffset);
+    }
+}
+
+bool PistonController::findHome(int direction, unsigned long timeout) {
+    debugPrint("Starting home search in direction: ", direction);
+    
+    unsigned long startTime = millis();
+    _isReferenced = false;
+    
+    // Move in specified direction until home signal is found
+    setValveState(direction > 0 ? EXTEND : RETRACT);
+    
+    while (!_isReferenced && (millis() - startTime < timeout)) {
+        // Allow other tasks to run
+        delay(1);
+    }
+    
+    // Stop movement
+    setValveState(HOLD);
+    
+    if (_isReferenced) {
+        // Reset position relative to home
+        _currentPosition = 0;
+        _targetPosition = 0;
+        debugPrint("Home found successfully at: ", _homeOffset);
+    } else {
+        debugPrint("Home search timed out after (ms): ", timeout);
+    }
+    
+    return _isReferenced;
 }
 
 void PistonController::updateEncoder() {
@@ -46,7 +105,6 @@ void PistonController::updateEncoder() {
     oldAB = ((oldAB << 2) | newAB) & 0x0F;
     _currentPosition += lookup[oldAB];
 }
-
 void PistonController::setTargetPosition(long position) {
     _targetPosition = position;
     _integral = 0; // Reset integral term when target changes

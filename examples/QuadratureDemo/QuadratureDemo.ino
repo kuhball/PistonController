@@ -1,50 +1,248 @@
-// BasicControl.ino
+// CompleteExample.ino
 #include <PistonController.h>
 
 // Pin definitions
-const int VALVE_PIN_1 = 25;  // ESP32 GPIO pin for valve direction 1
-const int VALVE_PIN_2 = 26;  // ESP32 GPIO pin for valve direction 2
-const int ENCODER_PIN_A = 32; // ESP32 GPIO pin for encoder A
-const int ENCODER_PIN_B = 33; // ESP32 GPIO pin for encoder B
+const int VALVE_PIN_1 = 25;    // ESP32 GPIO pin for valve direction 1
+const int VALVE_PIN_2 = 26;    // ESP32 GPIO pin for valve direction 2
+const int ENCODER_PIN_A = 32;  // ESP32 GPIO pin for encoder A
+const int ENCODER_PIN_B = 33;  // ESP32 GPIO pin for encoder B
+const int ENCODER_PIN_Z = 34;  // ESP32 GPIO pin for encoder Z (home)
+
+// Button pins for manual control
+const int BUTTON_HOME = 14;    // Home search button
+const int BUTTON_EXTEND = 12;  // Extend button
+const int BUTTON_RETRACT = 13; // Retract button
+const int BUTTON_STOP = 27;    // Emergency stop button
+
+// Movement parameters
+const long POSITION_1 = 1000;  // Extended position
+const long POSITION_2 = 0;     // Retracted position
+const long HOME_TIMEOUT = 30000; // Home search timeout in milliseconds
 
 // Create controller instance
-PistonController piston(VALVE_PIN_1, VALVE_PIN_2, ENCODER_PIN_A, ENCODER_PIN_B);
+PistonController piston(VALVE_PIN_1, VALVE_PIN_2, ENCODER_PIN_A, ENCODER_PIN_B, ENCODER_PIN_Z);
+
+// System state
+enum SystemState {
+    STATE_INIT,
+    STATE_HOMING,
+    STATE_IDLE,
+    STATE_RUNNING,
+    STATE_ERROR
+} currentState = STATE_INIT;
+
+// Movement mode
+enum MovementMode {
+    MODE_MANUAL,
+    MODE_AUTO
+} movementMode = MODE_MANUAL;
+
+// Timer variables
+unsigned long lastStatusPrint = 0;
+const int STATUS_INTERVAL = 500;  // Status print interval in milliseconds
+
+// Auto mode variables
+unsigned long lastPositionChange = 0;
+const unsigned long POSITION_CHANGE_INTERVAL = 5000;  // Time between automatic movements
+bool movingToPosition1 = true;
 
 void setup() {
+    // Initialize serial communication
     Serial.begin(115200);
+    while (!Serial && millis() < 5000);  // Wait for serial connection
     
-    // Initialize the controller
+    // Setup button pins
+    pinMode(BUTTON_HOME, INPUT_PULLUP);
+    pinMode(BUTTON_EXTEND, INPUT_PULLUP);
+    pinMode(BUTTON_RETRACT, INPUT_PULLUP);
+    pinMode(BUTTON_STOP, INPUT_PULLUP);
+    
+    // Initialize the controller with optimized PID values
     piston.begin();
+    piston.setPIDParameters(1.2, 0.1, 0.05);  // Adjust these values for your system
     
-    // Set PID parameters (tune these values for your system)
-    piston.setPIDParameters(1.0, 0.1, 0.05);
-    
-    // Calibrate the position
-    piston.calibrate();
+    Serial.println("System initialized. Press Home button to start homing sequence.");
+    printHelp();
 }
 
 void loop() {
-    // Example: Move to position 1000, wait, then move to position 0
-    static bool movingForward = true;
-    static unsigned long lastChange = 0;
+    // Check for serial commands
+    handleSerialCommands();
     
-    // Update the control loop
-    piston.update();
-    
-    // Print current position
-    Serial.print("Position: ");
-    Serial.println(piston.getCurrentPosition());
-    
-    // Change direction every 5 seconds
-    if (millis() - lastChange > 5000) {
-        if (movingForward) {
-            piston.setTargetPosition(1000);
-        } else {
-            piston.setTargetPosition(0);
-        }
-        movingForward = !movingForward;
-        lastChange = millis();
+    // Check emergency stop button
+    if (digitalRead(BUTTON_STOP) == LOW) {
+        handleEmergencyStop();
+        return;
     }
     
-    delay(10); // Small delay to prevent overwhelming the serial output
+    // State machine
+    switch (currentState) {
+        case STATE_INIT:
+            handleInitState();
+            break;
+            
+        case STATE_HOMING:
+            handleHomingState();
+            break;
+            
+        case STATE_IDLE:
+            handleIdleState();
+            break;
+            
+        case STATE_RUNNING:
+            handleRunningState();
+            break;
+            
+        case STATE_ERROR:
+            handleErrorState();
+            break;
+    }
+    
+    // Update status display periodically
+    if (millis() - lastStatusPrint >= STATUS_INTERVAL) {
+        printStatus();
+        lastStatusPrint = millis();
+    }
+}
+
+void handleInitState() {
+    if (digitalRead(BUTTON_HOME) == LOW) {
+        Serial.println("Starting homing sequence...");
+        currentState = STATE_HOMING;
+        delay(200);  // Simple debounce
+    }
+}
+
+void handleHomingState() {
+    static bool homingStarted = false;
+    
+    if (!homingStarted) {
+        homingStarted = true;
+        if (piston.findHome(1, HOME_TIMEOUT)) {
+            Serial.println("Homing successful!");
+            currentState = STATE_IDLE;
+        } else {
+            Serial.println("Homing failed!");
+            currentState = STATE_ERROR;
+        }
+        homingStarted = false;
+    }
+}
+
+void handleIdleState() {
+    if (movementMode == MODE_MANUAL) {
+        // Manual control using buttons
+        if (digitalRead(BUTTON_EXTEND) == LOW) {
+            piston.setTargetPosition(POSITION_1);
+            currentState = STATE_RUNNING;
+        } else if (digitalRead(BUTTON_RETRACT) == LOW) {
+            piston.setTargetPosition(POSITION_2);
+            currentState = STATE_RUNNING;
+        }
+    } else {
+        // Start automatic movement
+        currentState = STATE_RUNNING;
+        lastPositionChange = millis();
+    }
+}
+
+void handleRunningState() {
+    piston.update();  // Update position control
+    
+    if (movementMode == MODE_AUTO) {
+        // Automatic back-and-forth movement
+        if (millis() - lastPositionChange >= POSITION_CHANGE_INTERVAL) {
+            if (piston.isTargetReached()) {
+                if (movingToPosition1) {
+                    piston.setTargetPosition(POSITION_2);
+                } else {
+                    piston.setTargetPosition(POSITION_1);
+                }
+                movingToPosition1 = !movingToPosition1;
+                lastPositionChange = millis();
+            }
+        }
+    } else {
+        // Manual mode - return to idle when target reached
+        if (piston.isTargetReached()) {
+            currentState = STATE_IDLE;
+        }
+    }
+}
+
+void handleErrorState() {
+    static unsigned long lastBlink = 0;
+    const int BLINK_INTERVAL = 500;
+    
+    // Blink or indicate error state
+    if (millis() - lastBlink >= BLINK_INTERVAL) {
+        Serial.println("System in ERROR state. Press Home button to restart.");
+        lastBlink = millis();
+    }
+    
+    // Allow restart by homing
+    if (digitalRead(BUTTON_HOME) == LOW) {
+        currentState = STATE_INIT;
+        delay(200);  // Simple debounce
+    }
+}
+
+void handleEmergencyStop() {
+    piston.emergencyStop();
+    currentState = STATE_ERROR;
+    Serial.println("EMERGENCY STOP ACTIVATED!");
+}
+
+void handleSerialCommands() {
+    if (Serial.available()) {
+        char cmd = Serial.read();
+        switch (cmd) {
+            case 'h':  // Home
+                currentState = STATE_HOMING;
+                break;
+            case 'a':  // Toggle auto mode
+                movementMode = (movementMode == MODE_AUTO) ? MODE_MANUAL : MODE_AUTO;
+                Serial.printf("Mode changed to: %s\n", 
+                            (movementMode == MODE_AUTO) ? "AUTO" : "MANUAL");
+                break;
+            case 's':  // Stop
+                piston.emergencyStop();
+                currentState = STATE_IDLE;
+                break;
+            case '?':  // Help
+                printHelp();
+                break;
+        }
+    }
+}
+
+void printStatus() {
+    Serial.printf("Position: %ld, State: %s, Mode: %s\n",
+                 piston.getCurrentPosition(),
+                 getStateString(currentState),
+                 (movementMode == MODE_AUTO) ? "AUTO" : "MANUAL");
+}
+
+void printHelp() {
+    Serial.println("\nAvailable commands:");
+    Serial.println("h - Start homing sequence");
+    Serial.println("a - Toggle auto/manual mode");
+    Serial.println("s - Stop movement");
+    Serial.println("? - Show this help");
+    Serial.println("\nButtons:");
+    Serial.println("HOME - Start homing sequence");
+    Serial.println("EXTEND - Move to extended position");
+    Serial.println("RETRACT - Move to retracted position");
+    Serial.println("STOP - Emergency stop");
+}
+
+const char* getStateString(SystemState state) {
+    switch (state) {
+        case STATE_INIT: return "INIT";
+        case STATE_HOMING: return "HOMING";
+        case STATE_IDLE: return "IDLE";
+        case STATE_RUNNING: return "RUNNING";
+        case STATE_ERROR: return "ERROR";
+        default: return "UNKNOWN";
+    }
 }
