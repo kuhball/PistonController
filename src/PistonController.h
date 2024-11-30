@@ -1,4 +1,3 @@
-// PistonController.h
 #ifndef PISTON_CONTROLLER_H
 #define PISTON_CONTROLLER_H
 
@@ -19,7 +18,6 @@
     #define DEBUG_PRINTF(x, ...)
 #endif
 
-
 class PistonController {
 public:
     // Constructor
@@ -27,10 +25,9 @@ public:
         int valvePin1,      // Pin for valve direction 1
         int valvePin2,      // Pin for valve direction 2
         int encoderPinA,    // Encoder pin A
-        int encoderPinB,    // Encoder pin B
-        int encoderPinZ,    // Encoder home (Z) pin
-        bool enableDebug = true
+        int encoderPinB     // Encoder pin B
     );
+
     // Initialize the controller
     void begin();
     
@@ -55,11 +52,11 @@ public:
     // Calibrate the position (set current position as zero)
     void calibrate();
 
-    // Find home position
-    bool findHome(int direction = 1, unsigned long timeout = 30000);
-
-    // Check if position is referenced to home
-    bool isReferenced() const { return _isReferenced; }
+    // Jogging functions
+    void jogExtend(bool continuous = true);  // If continuous is false, will move a small increment
+    void jogRetract(bool continuous = true); // If continuous is false, will move a small increment
+    void stopJog();
+    bool isJogging() const { return _isJogging; }
 
     // Enable/disable debug prints at runtime
     void setDebug(bool enable) { _debugEnabled = enable; }
@@ -73,14 +70,15 @@ private:
     const int _valvePin2;
     const int _encoderPinA;
     const int _encoderPinB;
-    const int _encoderPinZ;
     
     // Position variables
     volatile long _currentPosition;
     long _targetPosition;
     const int _positionTolerance = 10; // encoder counts
-    volatile bool _isReferenced;
-    volatile long _homeOffset;
+    
+    // Jogging variables
+    bool _isJogging;
+    const long JOG_INCREMENT = 100; // encoder counts for non-continuous jog
     
     // Control variables
     float _kp = 1.0;
@@ -100,12 +98,11 @@ private:
     
     // Private methods
     void updateEncoder();
-    void checkHomeSignal();
     void setValveState(ValveState state);
     float calculatePID(float error);
     
     template<typename T>
-    void debugPrint(const char* msg, T value) {
+    void debugPrint(const char* msg, T value) const {  // Added const here
         #if PISTON_DEBUG
         if (_debugEnabled) {
             Serial.print(msg);
@@ -114,9 +111,8 @@ private:
         #endif
     }
     
-    // ISR friend functions
+    // ISR friend function for encoder
     friend void IRAM_ATTR encoderISR(void* arg);
-    friend void IRAM_ATTR homeISR(void* arg);
 };
 
 #endif

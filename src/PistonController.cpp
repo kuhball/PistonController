@@ -1,4 +1,3 @@
-// PistonController.cpp
 #include "PistonController.h"
 
 // ISR for encoder
@@ -7,31 +6,21 @@ void IRAM_ATTR encoderISR(void* arg) {
     controller->updateEncoder();
 }
 
-// ISR for home signal
-void IRAM_ATTR homeISR(void* arg) {
-    PistonController* controller = (PistonController*)arg;
-    controller->checkHomeSignal();
-}
-
 PistonController::PistonController(
     int valvePin1, 
     int valvePin2, 
     int encoderPinA, 
-    int encoderPinB, 
-    int encoderPinZ, 
-    bool enableDebug
+    int encoderPinB
 )
     : _valvePin1(valvePin1)
     , _valvePin2(valvePin2)
     , _encoderPinA(encoderPinA)
     , _encoderPinB(encoderPinB)
-    , _encoderPinZ(encoderPinZ)
     , _currentPosition(0)
     , _targetPosition(0)
     , _currentState(HOLD)
-    , _debugEnabled(enableDebug)
-    , _isReferenced(false)
-    , _homeOffset(0)
+    , _debugEnabled(true)
+    , _isJogging(false)
 {
 }
 
@@ -45,54 +34,15 @@ void PistonController::begin() {
     // Setup encoder pins
     pinMode(_encoderPinA, INPUT_PULLUP);
     pinMode(_encoderPinB, INPUT_PULLUP);
-    pinMode(_encoderPinZ, INPUT_PULLUP);
     
-    // Attach interrupts for encoder and home signal
+    // Attach interrupts for encoder
     attachInterruptArg(digitalPinToInterrupt(_encoderPinA), encoderISR, this, CHANGE);
     attachInterruptArg(digitalPinToInterrupt(_encoderPinB), encoderISR, this, CHANGE);
-    attachInterruptArg(digitalPinToInterrupt(_encoderPinZ), homeISR, this, FALLING);
     
     _lastTime = millis();
     
-    debugPrint("PistonController initialized. Encoder pins (A,B,Z): ", 
-               String(_encoderPinA) + "," + String(_encoderPinB) + "," + String(_encoderPinZ));
-}
-
-void PistonController::checkHomeSignal() {
-    if (!_isReferenced) {
-        _homeOffset = _currentPosition;
-        _isReferenced = true;
-        debugPrint("Home position found at offset: ", _homeOffset);
-    }
-}
-
-bool PistonController::findHome(int direction, unsigned long timeout) {
-    debugPrint("Starting home search in direction: ", direction);
-    
-    unsigned long startTime = millis();
-    _isReferenced = false;
-    
-    // Move in specified direction until home signal is found
-    setValveState(direction > 0 ? EXTEND : RETRACT);
-    
-    while (!_isReferenced && (millis() - startTime < timeout)) {
-        // Allow other tasks to run
-        delay(1);
-    }
-    
-    // Stop movement
-    setValveState(HOLD);
-    
-    if (_isReferenced) {
-        // Reset position relative to home
-        _currentPosition = 0;
-        _targetPosition = 0;
-        debugPrint("Home found successfully at: ", _homeOffset);
-    } else {
-        debugPrint("Home search timed out after (ms): ", timeout);
-    }
-    
-    return _isReferenced;
+    debugPrint("PistonController initialized. Encoder pins: ", 
+               String(_encoderPinA) + "," + String(_encoderPinB));
 }
 
 void PistonController::updateEncoder() {
@@ -105,9 +55,13 @@ void PistonController::updateEncoder() {
     oldAB = ((oldAB << 2) | newAB) & 0x0F;
     _currentPosition += lookup[oldAB];
 }
+
 void PistonController::setTargetPosition(long position) {
-    _targetPosition = position;
-    _integral = 0; // Reset integral term when target changes
+    if (!_isJogging) {
+        _targetPosition = position;
+        _integral = 0; // Reset integral term when target changes
+        debugPrint("New target position set: ", position);
+    }
 }
 
 long PistonController::getCurrentPosition() const {
@@ -115,8 +69,23 @@ long PistonController::getCurrentPosition() const {
 }
 
 void PistonController::update() {
+    if (_isJogging) {
+        return; // Skip PID control during jogging
+    }
+
     float error = _targetPosition - _currentPosition;
     float output = calculatePID(error);
+    
+    #if PISTON_DEBUG
+    if (_debugEnabled) {
+        static unsigned long lastDebugPrint = 0;
+        if (millis() - lastDebugPrint > 500) {
+            DEBUG_PRINTF("Position: %ld, Target: %ld, Error: %.2f, Output: %.2f\n", 
+                        _currentPosition, _targetPosition, error, output);
+            lastDebugPrint = millis();
+        }
+    }
+    #endif
     
     // Determine valve state based on PID output
     if (abs(error) <= _positionTolerance) {
@@ -145,25 +114,69 @@ float PistonController::calculatePID(float error) {
     if (_integral > 100) _integral = 100;
     if (_integral < -100) _integral = -100;
     
+    #if PISTON_DEBUG
+    if (_debugEnabled) {
+        static unsigned long lastPIDPrint = 0;
+        if (millis() - lastPIDPrint > 1000) {
+            DEBUG_PRINTF("PID details - P: %.2f, I: %.2f, D: %.2f\n", 
+                        proportional, _integral, derivative);
+            lastPIDPrint = millis();
+        }
+    }
+    #endif
+    
     return proportional + _integral + derivative;
 }
 
 void PistonController::setValveState(ValveState state) {
-    switch (state) {
-        case EXTEND:
-            digitalWrite(_valvePin1, HIGH);
-            digitalWrite(_valvePin2, LOW);
-            break;
-        case RETRACT:
-            digitalWrite(_valvePin1, LOW);
-            digitalWrite(_valvePin2, HIGH);
-            break;
-        case HOLD:
-            digitalWrite(_valvePin1, LOW);
-            digitalWrite(_valvePin2, LOW);
-            break;
+    if (state != _currentState) {
+        switch (state) {
+            case EXTEND:
+                digitalWrite(_valvePin1, HIGH);
+                digitalWrite(_valvePin2, LOW);
+                debugPrint("Valve state changed to: ", "EXTEND");
+                break;
+            case RETRACT:
+                digitalWrite(_valvePin1, LOW);
+                digitalWrite(_valvePin2, HIGH);
+                debugPrint("Valve state changed to: ", "RETRACT");
+                break;
+            case HOLD:
+                digitalWrite(_valvePin1, LOW);
+                digitalWrite(_valvePin2, LOW);
+                debugPrint("Valve state changed to: ", "HOLD");
+                break;
+        }
+        _currentState = state;
     }
-    _currentState = state;
+}
+
+void PistonController::jogExtend(bool continuous) {
+    _isJogging = true;
+    if (!continuous) {
+        _targetPosition = _currentPosition + JOG_INCREMENT;
+    }
+    setValveState(EXTEND);
+    debugPrint("Jogging extend. Continuous: ", continuous);
+}
+
+void PistonController::jogRetract(bool continuous) {
+    _isJogging = true;
+    if (!continuous) {
+        _targetPosition = _currentPosition - JOG_INCREMENT;
+    }
+    setValveState(RETRACT);
+    debugPrint("Jogging retract. Continuous: ", continuous);
+}
+
+void PistonController::stopJog() {
+    if (_isJogging) {
+        _isJogging = false;
+        setValveState(HOLD);
+        _targetPosition = _currentPosition; // Update target to current position
+        _integral = 0; // Reset integral term
+        debugPrint("Jog stopped at position: ", _currentPosition);
+    }
 }
 
 void PistonController::setPIDParameters(float kp, float ki, float kd) {
@@ -171,19 +184,35 @@ void PistonController::setPIDParameters(float kp, float ki, float kd) {
     _ki = ki;
     _kd = kd;
     _integral = 0; // Reset integral term when parameters change
+    
+    #if PISTON_DEBUG
+    if (_debugEnabled) {
+        DEBUG_PRINTF("PID parameters updated - Kp: %.2f, Ki: %.2f, Kd: %.2f\n", kp, ki, kd);
+    }
+    #endif
 }
 
 void PistonController::emergencyStop() {
+    _isJogging = false;
     setValveState(HOLD);
     _integral = 0;
+    debugPrint("Emergency stop triggered at position: ", _currentPosition);
 }
 
 bool PistonController::isTargetReached() const {
-    return abs(_targetPosition - _currentPosition) <= _positionTolerance;
+    if (_isJogging) {
+        return false;
+    }
+    bool reached = abs(_targetPosition - _currentPosition) <= _positionTolerance;
+    if (reached) {
+        debugPrint("Target position reached: ", _currentPosition);  // Now works with const
+    }
+    return reached;
 }
 
 void PistonController::calibrate() {
     _currentPosition = 0;
     _targetPosition = 0;
     _integral = 0;
+    debugPrint("Position calibrated to zero at time: ", millis());
 }
