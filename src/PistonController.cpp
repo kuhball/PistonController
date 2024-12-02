@@ -151,30 +151,22 @@ void PistonController::setValveState(ValveState state) {
     }
 }
 
-void PistonController::jogExtend(bool continuous) {
+void PistonController::jogExtend() {
     _isJogging = true;
-    if (!continuous) {
-        _targetPosition = _currentPosition + JOG_INCREMENT;
-    }
     setValveState(EXTEND);
-    debugPrint("Jogging extend. Continuous: ", continuous);
+    debugPrint("Jogging extend.");
 }
 
-void PistonController::jogRetract(bool continuous) {
+void PistonController::jogRetract() {
     _isJogging = true;
-    if (!continuous) {
-        _targetPosition = _currentPosition - JOG_INCREMENT;
-    }
     setValveState(RETRACT);
-    debugPrint("Jogging retract. Continuous: ", continuous);
+    debugPrint("Jogging retract.");
 }
 
 void PistonController::stopJog() {
     if (_isJogging) {
         _isJogging = false;
         setValveState(HOLD);
-        _targetPosition = _currentPosition; // Update target to current position
-        _integral = 0; // Reset integral term
         debugPrint("Jog stopped at position: ", _currentPosition);
     }
 }

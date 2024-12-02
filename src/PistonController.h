@@ -53,8 +53,8 @@ public:
     void calibrate();
 
     // Jogging functions
-    void jogExtend(bool continuous = true);  // If continuous is false, will move a small increment
-    void jogRetract(bool continuous = true); // If continuous is false, will move a small increment
+    void jogExtend();
+    void jogRetract();
     void stopJog();
     bool isJogging() const { return _isJogging; }
 
@@ -78,8 +78,7 @@ private:
     
     // Jogging variables
     bool _isJogging;
-    const long JOG_INCREMENT = 100; // encoder counts for non-continuous jog
-    
+
     // Control variables
     float _kp = 1.0;
     float _ki = 0.0;
@@ -100,6 +99,14 @@ private:
     void updateEncoder();
     void setValveState(ValveState state);
     float calculatePID(float error);
+    
+    void debugPrint(const char* msg) const { // Added const here
+        #if PISTON_DEBUG
+        if (_debugEnabled) {
+            Serial.println(msg);
+        }
+        #endif
+    }
     
     template<typename T>
     void debugPrint(const char* msg, T value) const {  // Added const here

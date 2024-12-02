@@ -163,27 +163,15 @@ void handleSerialCommand() {
             toggleMode();
             break;
             
-        case 'e': // Extend (jog)
-            if (currentMode == MODE_MANUAL) {
-                piston.jogExtend(false);  // Single increment
-            }
-            break;
-            
         case 'E': // Continuous extend
             if (currentMode == MODE_MANUAL) {
-                piston.jogExtend(true);
-            }
-            break;
-            
-        case 'r': // Retract (jog)
-            if (currentMode == MODE_MANUAL) {
-                piston.jogRetract(false);  // Single increment
+                piston.jogExtend();
             }
             break;
             
         case 'R': // Continuous retract
             if (currentMode == MODE_MANUAL) {
-                piston.jogRetract(true);
+                piston.jogRetract();
             }
             break;
             
@@ -211,9 +199,7 @@ void printStatus() {
 void printHelp() {
     Serial.println(F("\nAvailable Commands:"));
     Serial.println(F("m - Toggle manual/auto mode"));
-    Serial.println(F("e - Jog extend (increment)"));
     Serial.println(F("E - Continuous extend"));
-    Serial.println(F("r - Jog retract (increment)"));
     Serial.println(F("R - Continuous retract"));
     Serial.println(F("s - Stop movement"));
     Serial.println(F("z - Zero position"));
