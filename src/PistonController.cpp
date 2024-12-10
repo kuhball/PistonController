@@ -10,12 +10,21 @@ PistonController::PistonController(
     int valvePin1, 
     int valvePin2, 
     int encoderPinA, 
-    int encoderPinB
+    int encoderPinB, 
+    int encoderPinZ, 
+    int dmxPinRx,
+    int dmxPinTx,
+    int dmxPinEn,
+    bool enableDebug
 )
     : _valvePin1(valvePin1)
     , _valvePin2(valvePin2)
     , _encoderPinA(encoderPinA)
     , _encoderPinB(encoderPinB)
+    , _encoderPinZ(encoderPinZ)
+    , _dmxPinRx(dmxPinRx)
+    , _dmxPinTx(dmxPinTx)
+    , _dmxPinEn(dmxPinEn)
     , _currentPosition(0)
     , _targetPosition(0)
     , _currentState(HOLD)
@@ -34,6 +43,18 @@ void PistonController::begin() {
     // Setup encoder pins
     pinMode(_encoderPinA, INPUT_PULLUP);
     pinMode(_encoderPinB, INPUT_PULLUP);
+    pinMode(_encoderPinZ, INPUT_PULLUP);
+
+    // Setup Dmx
+    dmx_config_t config = DMX_CONFIG_DEFAULT;
+    dmx_personality_t personalities[] = {
+        {2, "2 channel switch"}
+    };
+    int personality_count = 1;
+    dmx_driver_install(_dmxPort, &config, personalities, personality_count);
+
+    dmx_set_pin(_dmxPort, _dmxPinTx, _dmxPinRx, _dmxPinEn);
+
     
     // Attach interrupts for encoder
     attachInterruptArg(digitalPinToInterrupt(_encoderPinA), encoderISR, this, CHANGE);
@@ -43,6 +64,64 @@ void PistonController::begin() {
     
     debugPrint("PistonController initialized. Encoder pins: ", 
                String(_encoderPinA) + "," + String(_encoderPinB));
+
+void PistonController::checkDmxSignal() {
+    dmx_packet_t packet;
+
+    if (dmx_receive(_dmxPort, &packet, DMX_TIMEOUT_TICK)) {
+        unsigned long now = millis();
+
+        if (!packet.err) {
+            dmx_read(1, _data, packet.size);
+        }
+    }
+}
+
+void PistonController::simpleSwitch(){
+        if (_data[1] > 127) {
+            setValveState(EXTEND);
+        } else if (_data[2] > 127) {
+            setValveState(RETRACT);
+        } else {
+            setValveState(HOLD);
+        }
+}
+
+void PistonController::checkHomeSignal() {
+    if (!_isReferenced) {
+        _homeOffset = _currentPosition;
+        _isReferenced = true;
+        debugPrint("Home position found at offset: ", _homeOffset);
+    }
+}
+
+bool PistonController::findHome(int direction, unsigned long timeout) {
+    debugPrint("Starting home search in direction: ", direction);
+    
+    unsigned long startTime = millis();
+    _isReferenced = false;
+    
+    // Move in specified direction until home signal is found
+    setValveState(direction > 0 ? EXTEND : RETRACT);
+    
+    while (!_isReferenced && (millis() - startTime < timeout)) {
+        // Allow other tasks to run
+        delay(1);
+    }
+    
+    // Stop movement
+    setValveState(HOLD);
+    
+    if (_isReferenced) {
+        // Reset position relative to home
+        _currentPosition = 0;
+        _targetPosition = 0;
+        debugPrint("Home found successfully at: ", _homeOffset);
+    } else {
+        debugPrint("Home search timed out after (ms): ", timeout);
+    }
+    
+    return _isReferenced;
 }
 
 void PistonController::updateEncoder() {

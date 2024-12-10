@@ -2,6 +2,7 @@
 #define PISTON_CONTROLLER_H
 
 #include <Arduino.h>
+#include <esp_dmx.h>
 
 // Debug configuration
 #ifndef PISTON_DEBUG
@@ -25,7 +26,12 @@ public:
         int valvePin1,      // Pin for valve direction 1
         int valvePin2,      // Pin for valve direction 2
         int encoderPinA,    // Encoder pin A
-        int encoderPinB     // Encoder pin B
+        int encoderPinB,    // Encoder pin B
+        int encoderPinZ,    // Encoder home (Z) pin
+        int dmxPinRx,
+        int dmxPinTx,
+        int dmxPinEn,
+        bool enableDebug = true
     );
 
     // Initialize the controller
@@ -39,6 +45,10 @@ public:
     
     // Update control loop (call this in main loop)
     void update();
+
+    void checkDmxSignal();
+
+    void simpleSwitch();
     
     // Set PID control parameters
     void setPIDParameters(float kp, float ki, float kd);
@@ -70,6 +80,14 @@ private:
     const int _valvePin2;
     const int _encoderPinA;
     const int _encoderPinB;
+    const int _encoderPinZ;
+    const int _dmxPinRx;
+    const int _dmxPinTx;
+    const int _dmxPinEn;
+
+    // Dmx variables
+    byte _data[DMX_PACKET_SIZE];
+    dmx_port_t _dmxPort = 1;
     
     // Position variables
     volatile long _currentPosition;
