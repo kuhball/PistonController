@@ -13,13 +13,21 @@ const int BUTTON_JOG_RETRACT = 13;  // Jog retract button
 const int BUTTON_STOP = 27;         // Emergency stop button
 const int BUTTON_MODE = 14;         // Mode switch button
 
+// DMX pins
+const int DMX_RX = 16;
+const int DMX_TX = 17;
+const int DMX_EN = 21;
+
 // Create controller instance
-PistonController piston(VALVE_PIN_1, VALVE_PIN_2, ENCODER_PIN_A, ENCODER_PIN_B);
+PistonController piston(VALVE_PIN_1, VALVE_PIN_2, ENCODER_PIN_A, ENCODER_PIN_B, DMX_RX, DMX_TX, DMX_EN);
 
 // Operating modes
 enum OperatingMode {
     MODE_MANUAL,
-    MODE_AUTO
+    MODE_AUTO,
+    MODE_DMX_SWITCH,
+    MODE_DMX_LINEAR,
+    MODE_HOMING
 } currentMode = MODE_MANUAL;
 
 // Movement parameters
@@ -69,14 +77,27 @@ void loop() {
     
     // Check mode button with debounce
     handleModeButton();
-    
-    // Handle jogging in manual mode
-    if (currentMode == MODE_MANUAL) {
-        handleJoggingButtons();
-    }
-    // Handle automatic movement in auto mode
-    else if (!piston.isJogging()) {  // Only run auto mode if not jogging
-        handleAutoMode();
+
+    switch(currentMode) {
+        case MODE_MANUAL:
+            handleJoggingButtons();
+            break;
+        case MODE_AUTO:
+            if (!piston.isJogging()) {
+                handleAutoMode();
+            }
+            break;
+        case MODE_DMX_SWITCH:
+            piston.checkDmxSignal();
+            piston.dmxSwitch();
+            break;
+        case MODE_DMX_LINEAR:
+            piston.dmxLinear();
+            break;
+        case MODE_HOMING:
+            piston.findHome();
+            currentMode = MODE_AUTO;
+            break;
     }
     
     // Update position control

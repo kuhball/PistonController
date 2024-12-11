@@ -27,7 +27,6 @@ public:
         int valvePin2,      // Pin for valve direction 2
         int encoderPinA,    // Encoder pin A
         int encoderPinB,    // Encoder pin B
-        int encoderPinZ,    // Encoder home (Z) pin
         int dmxPinRx,
         int dmxPinTx,
         int dmxPinEn,
@@ -48,7 +47,9 @@ public:
 
     void checkDmxSignal();
 
-    void simpleSwitch();
+    void dmxSwitch();
+
+    void dmxLinear();
     
     // Set PID control parameters
     void setPIDParameters(float kp, float ki, float kd);
@@ -68,6 +69,9 @@ public:
     void stopJog();
     bool isJogging() const { return _isJogging; }
 
+    // Find home position
+    bool findHome(unsigned long timeout = 30000);
+
     // Enable/disable debug prints at runtime
     void setDebug(bool enable) { _debugEnabled = enable; }
 
@@ -80,7 +84,6 @@ private:
     const int _valvePin2;
     const int _encoderPinA;
     const int _encoderPinB;
-    const int _encoderPinZ;
     const int _dmxPinRx;
     const int _dmxPinTx;
     const int _dmxPinEn;
@@ -93,6 +96,9 @@ private:
     volatile long _currentPosition;
     long _targetPosition;
     const int _positionTolerance = 10; // encoder counts
+    volatile long _homeExtend;
+    volatile long _homeRetract;
+    volatile long _travelLength;
     
     // Jogging variables
     bool _isJogging;

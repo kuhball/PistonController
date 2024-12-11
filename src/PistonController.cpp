@@ -11,7 +11,6 @@ PistonController::PistonController(
     int valvePin2, 
     int encoderPinA, 
     int encoderPinB, 
-    int encoderPinZ, 
     int dmxPinRx,
     int dmxPinTx,
     int dmxPinEn,
@@ -21,7 +20,6 @@ PistonController::PistonController(
     , _valvePin2(valvePin2)
     , _encoderPinA(encoderPinA)
     , _encoderPinB(encoderPinB)
-    , _encoderPinZ(encoderPinZ)
     , _dmxPinRx(dmxPinRx)
     , _dmxPinTx(dmxPinTx)
     , _dmxPinEn(dmxPinEn)
@@ -30,6 +28,8 @@ PistonController::PistonController(
     , _currentState(HOLD)
     , _debugEnabled(true)
     , _isJogging(false)
+    , _homeExtend(0)
+    , _homeRetract(0)
 {
 }
 
@@ -43,14 +43,14 @@ void PistonController::begin() {
     // Setup encoder pins
     pinMode(_encoderPinA, INPUT_PULLUP);
     pinMode(_encoderPinB, INPUT_PULLUP);
-    pinMode(_encoderPinZ, INPUT_PULLUP);
 
     // Setup Dmx
     dmx_config_t config = DMX_CONFIG_DEFAULT;
     dmx_personality_t personalities[] = {
-        {2, "2 channel switch"}
+        {2, "2 channel switch"},
+        {1, "linear movement"}
     };
-    int personality_count = 1;
+    int personality_count = 2;
     dmx_driver_install(_dmxPort, &config, personalities, personality_count);
 
     dmx_set_pin(_dmxPort, _dmxPinTx, _dmxPinRx, _dmxPinEn);
@@ -64,6 +64,7 @@ void PistonController::begin() {
     
     debugPrint("PistonController initialized. Encoder pins: ", 
                String(_encoderPinA) + "," + String(_encoderPinB));
+}
 
 void PistonController::checkDmxSignal() {
     dmx_packet_t packet;
@@ -77,7 +78,7 @@ void PistonController::checkDmxSignal() {
     }
 }
 
-void PistonController::simpleSwitch(){
+void PistonController::dmxSwitch(){
         if (_data[1] > 127) {
             setValveState(EXTEND);
         } else if (_data[2] > 127) {
@@ -87,41 +88,42 @@ void PistonController::simpleSwitch(){
         }
 }
 
-void PistonController::checkHomeSignal() {
-    if (!_isReferenced) {
-        _homeOffset = _currentPosition;
-        _isReferenced = true;
-        debugPrint("Home position found at offset: ", _homeOffset);
+void PistonController::dmxLinear(){
+        setTargetPosition((_travelLength / 255) * _data[1]);
     }
-}
 
-bool PistonController::findHome(int direction, unsigned long timeout) {
-    debugPrint("Starting home search in direction: ", direction);
-    
+bool PistonController::findHome(unsigned long timeout) {
+    debugPrint("Starting home search");
+
+
+    // search for home position in retract
     unsigned long startTime = millis();
-    _isReferenced = false;
+    setValveState(RETRACT);
     
-    // Move in specified direction until home signal is found
-    setValveState(direction > 0 ? EXTEND : RETRACT);
-    
-    while (!_isReferenced && (millis() - startTime < timeout)) {
+    while (millis() - startTime < timeout) {
         // Allow other tasks to run
         delay(1);
     }
-    
-    // Stop movement
     setValveState(HOLD);
+
+    debugPrint("Home extend found successfully at: ", _currentPosition);
+    _homeRetract = _currentPosition;
     
-    if (_isReferenced) {
-        // Reset position relative to home
-        _currentPosition = 0;
-        _targetPosition = 0;
-        debugPrint("Home found successfully at: ", _homeOffset);
-    } else {
-        debugPrint("Home search timed out after (ms): ", timeout);
+    // search for home position in extend
+    startTime = millis();
+    setValveState(EXTEND);
+    
+    while (millis() - startTime < timeout) {
+        // Allow other tasks to run
+        delay(1);
     }
-    
-    return _isReferenced;
+    setValveState(HOLD);
+
+    debugPrint("Home extend found successfully at: ", _currentPosition);
+    _homeExtend = _currentPosition;
+
+    _travelLength = _homeExtend - _homeRetract;
+    debugPrint("Travel length is ", _travelLength);
 }
 
 void PistonController::updateEncoder() {
