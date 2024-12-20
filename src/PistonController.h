@@ -62,9 +62,7 @@ public:
     void setup();
     void loop();
 
-    // Check if target position is reached (within tolerance)
-    bool isTargetReached() const;
-
+    void pwm();
 private:
     // Pins
     const int _valvePin1;
@@ -86,6 +84,12 @@ private:
     void readDmx();                       // ~Read a DMX frame if available
     void dmxLinear();                     // Set position from DMX
 
+    // TIMER pwm
+    hw_timer_t *_timer = NULL;
+    friend void IRAM_ATTR timerISR(void* arg);
+    uint8_t _dutyCycle1;
+    uint8_t _dutyCycle2;
+
     // Piston Valve
     ValveState _currentValveState;        // Stores the current valve state
     void setValveState(ValveState state); // Update the current valve state
@@ -94,7 +98,7 @@ private:
     volatile long _currentPosition;       // Current position of encoder, updated by ISR
     long _targetPosition;                 // TargetPosition
     void setTargetPosition(long position);
-    const int _positionTolerance = 10;    // Encoder Counts
+    const int _positionTolerance = 10;     // Encoder Counts
 
     long _homeExtended;                   // Used during homing
     long _homeRetracted;                  // Used during homing

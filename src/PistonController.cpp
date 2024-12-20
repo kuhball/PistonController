@@ -6,6 +6,34 @@ void IRAM_ATTR encoderISR(void* arg) {
     controller->updateEncoder();
 }
 
+PistonController *controller = NULL;
+
+// ISR for timer
+void IRAM_ATTR timerISR(void)
+{
+    controller->pwm();
+}
+
+void PistonController::pwm()
+{
+    static uint8_t pwm_counter = 0;
+
+    pwm_counter++;
+    if (pwm_counter > _dutyCycle1) {
+        digitalWrite(_valvePin1, LOW);
+    }
+    if (pwm_counter < _dutyCycle1) {
+        digitalWrite(_valvePin1, HIGH);
+    }
+
+    if (pwm_counter > _dutyCycle2) {
+        digitalWrite(_valvePin2, LOW);
+    }
+    if (pwm_counter < _dutyCycle2) {
+        digitalWrite(_valvePin2, HIGH);
+    }
+}
+
 PistonController::PistonController(
     int valvePin1,
     int valvePin2,
@@ -65,6 +93,14 @@ void PistonController::setup() {
     enterState(PISTON_CONTROLLER_INIT);
     debugPrintf("PistonController initialized. Encoder pins: %d, %d\n",
                 _encoderPinA, _encoderPinB);
+
+    // Setup Timer
+    controller = this;
+    _timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(_timer, timerISR, true);
+    timerAlarmWrite(_timer, 1000, true);
+    timerAlarmEnable(_timer);
+
     // Simulate homed state for rapid development
     // enterState(PISTON_CONTROLLER_HOMED);
     // _travelLength = 41277;
@@ -296,18 +332,18 @@ void PistonController::setValveState(ValveState state) {
     _currentValveState = state;
     switch (state) {
         case EXTEND:
-            digitalWrite(_valvePin1, HIGH);
-            digitalWrite(_valvePin2, LOW);
+            _dutyCycle1 = 255;
+            _dutyCycle2 = 0;
             debugPrintf("Valve state changed to: EXTEND\n");
             break;
         case RETRACT:
-            digitalWrite(_valvePin1, LOW);
-            digitalWrite(_valvePin2, HIGH);
+            _dutyCycle1 = 0;
+            _dutyCycle2 = 255;
             debugPrintf("Valve state changed to: RETRACT\n");
             break;
         case HOLD:
-            digitalWrite(_valvePin1, LOW);
-            digitalWrite(_valvePin2, LOW);
+            _dutyCycle1 = 0;
+            _dutyCycle2 = 0;
             debugPrintf("Valve state changed to: HOLD\n");
             break;
     }
