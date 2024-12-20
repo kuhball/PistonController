@@ -1,4 +1,3 @@
-// CompleteExample.ino
 #include <PistonController.h>
 #include <esp_dmx.h>
 #include <Arduino.h>
