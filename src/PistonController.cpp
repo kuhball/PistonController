@@ -22,6 +22,8 @@ PistonController::PistonController(
     , _dmxPinRx(dmxPinRx)
     , _dmxPinTx(dmxPinTx)
     , _dmxPinEn(dmxPinEn)
+
+    , _dmxPort(DMX_NUM_1)
     , _currentPosition(0)
     , _targetPosition(0)
     , _currentState(HOLD)
@@ -31,7 +33,7 @@ PistonController::PistonController(
 {
 }
 
-void PistonController::begin() {
+void PistonController::setup() {
     // Setup valve control pins
     pinMode(_valvePin1, OUTPUT);
     pinMode(_valvePin2, OUTPUT);
@@ -43,15 +45,13 @@ void PistonController::begin() {
     pinMode(_encoderPinB, INPUT_PULLUP);
 
     // Setup Dmx
-    dmx_config_t config = DMX_CONFIG_DEFAULT;
+    dmx_config_t config = DMX_CONFIG_DEFAULT; // TODO: Include build version here for RDM
     dmx_personality_t personalities[] = {
-        {2, "2 channel switch"},
+        {5, "Piston Controller"},
     };
     int personality_count = 1;
     dmx_driver_install(_dmxPort, &config, personalities, personality_count);
-
     dmx_set_pin(_dmxPort, _dmxPinTx, _dmxPinRx, _dmxPinEn);
-
 
     // Attach interrupts for encoder
     attachInterruptArg(digitalPinToInterrupt(_encoderPinA), encoderISR, this, CHANGE);
@@ -63,12 +63,15 @@ void PistonController::begin() {
                 _encoderPinA, _encoderPinB);
 }
 
+void PistonController::loop() {
+    checkDmxSignal();
+    dmxSwitch();
+}
+
 void PistonController::checkDmxSignal() {
     dmx_packet_t packet;
 
     if (dmx_receive(_dmxPort, &packet, DMX_TIMEOUT_TICK)) {
-        unsigned long now = millis();
-
         if (!packet.err) {
             dmx_read(1, _data, packet.size);
         }
@@ -249,13 +252,6 @@ void PistonController::setPIDParameters(float kp, float ki, float kd) {
     _integral = 0; // Reset integral term when parameters change
 
     debugPrintf("PID parameters updated - Kp: %.2f, Ki: %.2f, Kd: %.2f\n", kp, ki, kd);
-}
-
-void PistonController::emergencyStop() {
-    _isJogging = false;
-    setValveState(HOLD);
-    _integral = 0;
-    debugPrintf("Emergency stop triggered at position: %ld\n", _currentPosition);
 }
 
 bool PistonController::isTargetReached() const {

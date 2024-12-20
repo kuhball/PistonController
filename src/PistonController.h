@@ -29,7 +29,9 @@ public:
     );
 
     // Initialize the controller
-    void begin();
+    void setup();
+
+    void loop();
 
     // Set target position in encoder counts
     void setTargetPosition(long position);
@@ -76,7 +78,7 @@ private:
 
     // Dmx variables
     byte _data[DMX_PACKET_SIZE];
-    dmx_port_t _dmxPort = 1;
+    dmx_port_t _dmxPort;
 
     // Position variables
     volatile long _currentPosition;
