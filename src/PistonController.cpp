@@ -65,6 +65,10 @@ void PistonController::setup() {
     enterState(PISTON_CONTROLLER_INIT);
     debugPrintf("PistonController initialized. Encoder pins: %d, %d\n",
                 _encoderPinA, _encoderPinB);
+    // Simulate homed state for rapid development
+    // enterState(PISTON_CONTROLLER_HOMED);
+    // _travelLength = 41277;
+    // _currentPosition = 41277;
 }
 
 static const char *PistonControllerStateStr[] = {
@@ -154,7 +158,8 @@ void PistonController::loop() {
             enterState(PISTON_CONTROLLER_REHOME_START);
         }
         dmxLinear();
-        runPID();
+        runSimple();
+        //runPID();
         break;
     case PISTON_CONTROLLER_REHOME_START:
         setValveState(HOLD);
@@ -180,10 +185,17 @@ void PistonController::readDmx() {
 
 void PistonController::dmxLinear()
 {
-    long dmxPosition = (_dmxData[DMX_CHAN_POS_MSB] << 8)
+    uint16_t dmxPosition = (_dmxData[DMX_CHAN_POS_MSB] << 8)
                        | _dmxData[DMX_CHAN_POS_LSB];
 
-    setTargetPosition((dmxPosition * _travelLength)/65535);
+    // Beware of overflows
+    uint64_t targetPosition = (65535 - dmxPosition);
+    targetPosition *= _travelLength;
+    targetPosition /= 65535;
+
+    //debugPrintf("Got DMX position %u, TravelLength = %ld, Target Position = %lu\n",
+    //            dmxPosition, _travelLength, targetPosition);
+    setTargetPosition(targetPosition);
 }
 
 void PistonController::updateEncoder() {
@@ -214,7 +226,19 @@ void PistonController::setTargetPosition(long position) {
 
     _targetPosition = position;
     resetPID();
-    debugPrintf("New target position set: %ld\n", position);
+    debugPrintf("New target position set: %ld, Current Position: %ld\n", position, _currentPosition);
+}
+
+void PistonController::runSimple() {
+    float error = _targetPosition - _currentPosition;
+    // Determine valve state based on PID output
+    if (abs(error) <= _positionTolerance) {
+        setValveState(HOLD);
+    } else if (error > 0) {
+        setValveState(EXTEND);
+    } else {
+        setValveState(RETRACT);
+    }
 }
 
 void PistonController::runPID() {

@@ -103,6 +103,7 @@ private:
 
     // Update PID control loop
     void runPID();
+    void runSimple();
     void resetPID();
 
     // Jogging variables
