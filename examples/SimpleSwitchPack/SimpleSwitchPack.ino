@@ -39,6 +39,7 @@ enum SystemState {
 
 // Movement mode
 enum MovementMode {
+    MODE_DMX,
     MODE_MANUAL,
     MODE_AUTO
 } movementMode = MODE_MANUAL;
@@ -71,7 +72,7 @@ void setup() {
     printHelp();
 }
 
-voidloop() {
+void loop() {
     // Check for serial commands
     handleSerialCommands();
     
@@ -128,7 +129,7 @@ void handleHomingState() {
     
     if (!homingStarted) {
         homingStarted = true;
-        if (piston.findHome(1, HOME_TIMEOUT)) {
+        if (piston.findHome(HOME_TIMEOUT)) {
             Serial.println("Homing successful!");
             currentState = STATE_IDLE;
         } else {
@@ -228,7 +229,7 @@ void handleSerialCommands() {
 
 void handleSwitchState() {
     piston.checkDmxSignal();
-    piston.simpleSwitch();
+    piston.dmxSwitch();
 }
 
 void printStatus() {
