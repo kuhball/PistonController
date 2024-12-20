@@ -13,7 +13,10 @@ PistonController::PistonController(
     int encoderPinB,
     int dmxPinRx,
     int dmxPinTx,
-    int dmxPinEn
+    int dmxPinEn,
+    float kp,
+    float ki,
+    float kd
 )
     : _valvePin1(valvePin1)
     , _valvePin2(valvePin2)
@@ -22,14 +25,17 @@ PistonController::PistonController(
     , _dmxPinRx(dmxPinRx)
     , _dmxPinTx(dmxPinTx)
     , _dmxPinEn(dmxPinEn)
+    , _kp(kp)
+    , _ki(ki)
+    , _kd(kd)
 
+    , _state(PISTON_CONTROLLER_INVALID)
     , _dmxPort(DMX_NUM_1)
     , _currentPosition(0)
     , _targetPosition(0)
-    , _currentState(HOLD)
-    , _isJogging(false)
-    , _homeExtend(0)
-    , _homeRetract(0)
+    , _currentValveState(INVALID)
+    , _homeExtended(0)
+    , _homeRetracted(0)
 {
 }
 
@@ -37,12 +43,15 @@ void PistonController::setup() {
     // Setup valve control pins
     pinMode(_valvePin1, OUTPUT);
     pinMode(_valvePin2, OUTPUT);
-    digitalWrite(_valvePin1, LOW);
-    digitalWrite(_valvePin2, LOW);
+    setValveState(HOLD);
 
     // Setup encoder pins
     pinMode(_encoderPinA, INPUT_PULLUP);
     pinMode(_encoderPinB, INPUT_PULLUP);
+
+    // Attach interrupts for encoder
+    attachInterruptArg(digitalPinToInterrupt(_encoderPinA), encoderISR, this, CHANGE);
+    attachInterruptArg(digitalPinToInterrupt(_encoderPinB), encoderISR, this, CHANGE);
 
     // Setup Dmx
     dmx_config_t config = DMX_CONFIG_DEFAULT; // TODO: Include build version here for RDM
@@ -53,78 +62,120 @@ void PistonController::setup() {
     dmx_driver_install(_dmxPort, &config, personalities, personality_count);
     dmx_set_pin(_dmxPort, _dmxPinTx, _dmxPinRx, _dmxPinEn);
 
-    // Attach interrupts for encoder
-    attachInterruptArg(digitalPinToInterrupt(_encoderPinA), encoderISR, this, CHANGE);
-    attachInterruptArg(digitalPinToInterrupt(_encoderPinB), encoderISR, this, CHANGE);
-
-    _lastTime = millis();
-
+    enterState(PISTON_CONTROLLER_INIT);
     debugPrintf("PistonController initialized. Encoder pins: %d, %d\n",
                 _encoderPinA, _encoderPinB);
 }
 
-void PistonController::loop() {
-    checkDmxSignal();
-    dmxSwitch();
+static const char *PistonControllerStateStr[] = {
+    "INIT",
+    "HOME_START",
+    "HOME_EXTEND",
+    "HOME_RETRACT",
+    "HOMED",
+    "REHOME_START",
+    "INVALID"
+};
+
+void PistonController::enterState(enum PistonControllerState state)
+{
+    if (_state == state) {
+        debugPrintf("Warning: Attempted to re-enter state %s\n",
+                    PistonControllerStateStr[state]);
+        return;
+    }
+
+    debugPrintf("State change %s -> %s", PistonControllerStateStr[_state],
+                PistonControllerStateStr[state]);
+
+    _state = state;
+    _lastStateChange = millis();
 }
 
-void PistonController::checkDmxSignal() {
+void PistonController::loop() {
+    readDmx();
+
+    if (_dmxData[DMX_CHAN_EXTEND] > 127) {
+        _isJogging = true;
+        setValveState(EXTEND);
+        return;
+    }
+
+    if (_dmxData[DMX_CHAN_RETRACT] > 127) {
+        _isJogging = true;
+        setValveState(RETRACT);
+        return;
+    }
+
+    switch (_state) {
+    case PISTON_CONTROLLER_INIT:
+        setValveState(HOLD);
+        if (_dmxData[DMX_CHAN_CTRL] == 128) {
+            enterState(PISTON_CONTROLLER_HOME_START);
+        }
+        break;
+    case PISTON_CONTROLLER_HOME_START:
+        setValveState(HOLD);
+        if (_dmxData[DMX_CHAN_CTRL] != 128) {
+            enterState(PISTON_CONTROLLER_INIT);
+        }
+        if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
+            enterState(PISTON_CONTROLLER_HOME_EXTEND);
+        }
+        break;
+    case PISTON_CONTROLLER_HOME_EXTEND:
+        setValveState(EXTEND);
+        if (millis() - _lastStateChange > TIMEOUT_HOME_EXTEND) {
+            _homeExtended = _currentPosition;
+            enterState(PISTON_CONTROLLER_HOME_RETRACT);
+        }
+        break;
+    case PISTON_CONTROLLER_HOME_RETRACT:
+        setValveState(RETRACT);
+        if (millis() - _lastStateChange > TIMEOUT_HOME_RETRACT) {
+            _homeRetracted = _currentPosition;
+            _travelLength = _homeExtended - _homeRetracted;
+            _currentPosition = 0;
+            debugPrintf("Homing complete. Travel length %ld\n", _travelLength);
+            enterState(PISTON_CONTROLLER_HOMED);
+            _isJogging = true; // Reset PID on entering homed state
+        }
+        break;
+    case PISTON_CONTROLLER_HOMED:
+        if (_dmxData[DMX_CHAN_CTRL] == 128) {
+            enterState(PISTON_CONTROLLER_REHOME_START);
+        }
+        dmxLinear();
+        runPID();
+        break;
+    case PISTON_CONTROLLER_REHOME_START:
+        setValveState(HOLD);
+        if (_dmxData[DMX_CHAN_CTRL] != 128) {
+            enterState(PISTON_CONTROLLER_HOMED);
+        }
+        if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
+            enterState(PISTON_CONTROLLER_HOME_EXTEND);
+        }
+        break;
+    }
+}
+
+void PistonController::readDmx() {
     dmx_packet_t packet;
 
     if (dmx_receive(_dmxPort, &packet, DMX_TIMEOUT_TICK)) {
         if (!packet.err) {
-            dmx_read(1, _data, packet.size);
+            dmx_read(1, _dmxData, packet.size);
         }
     }
 }
 
-void PistonController::dmxSwitch(){
-        if (_data[1] > 127) {
-            setValveState(EXTEND);
-        } else if (_data[2] > 127) {
-            setValveState(RETRACT);
-        } else {
-            setValveState(HOLD);
-        }
-}
+void PistonController::dmxLinear()
+{
+    long dmxPosition = (_dmxData[DMX_CHAN_POS_MSB] << 8)
+                       | _dmxData[DMX_CHAN_POS_LSB];
 
-void PistonController::dmxLinear(){
-        setTargetPosition((_travelLength / 255) * _data[1]);
-    }
-
-bool PistonController::findHome(unsigned long timeout) {
-    debugPrintf("Starting home search\n");
-
-
-    // search for home position in retract
-    unsigned long startTime = millis();
-    setValveState(RETRACT);
-
-    while (millis() - startTime < timeout) {
-        // Allow other tasks to run
-        delay(1);
-    }
-    setValveState(HOLD);
-
-    debugPrintf("Home retract found successfully at: %ld\n", _currentPosition);
-    _homeRetract = _currentPosition;
-
-    // search for home position in extend
-    startTime = millis();
-    setValveState(EXTEND);
-
-    while (millis() - startTime < timeout) {
-        // Allow other tasks to run
-        delay(1);
-    }
-    setValveState(HOLD);
-
-    debugPrintf("Home extend found successfully at: %ld\n", _currentPosition);
-    _homeExtend = _currentPosition;
-
-    _travelLength = _homeExtend - _homeRetract;
-    debugPrintf("Travel length is %ld", _travelLength);
-    return true;
+    setTargetPosition((dmxPosition * _travelLength)/65535);
 }
 
 void PistonController::updateEncoder() {
@@ -138,23 +189,27 @@ void PistonController::updateEncoder() {
     _currentPosition += lookup[oldAB];
 }
 
+void PistonController::resetPID() {
+    debugPrintf("Resetting PID...");
+    _integral = 0; // Reset integral term when target changes
+    _lastTime = millis();
+}
+
 void PistonController::setTargetPosition(long position) {
-    if (!_isJogging) {
-        _targetPosition = position;
-        _integral = 0; // Reset integral term when target changes
-        debugPrintf("New target position set: %ld\n", position);
+    if (_targetPosition == position) {
+        if (_isJogging) {
+            resetPID();
+            _isJogging = false;
+        }
+        return;
     }
+
+    _targetPosition = position;
+    resetPID();
+    debugPrintf("New target position set: %ld\n", position);
 }
 
-long PistonController::getCurrentPosition() const {
-    return _currentPosition;
-}
-
-void PistonController::update() {
-    // if (_isJogging) {
-    //     return; // Skip PID control during jogging
-    // }
-
+void PistonController::runPID() {
     float error = _targetPosition - _currentPosition;
     float output = calculatePID(error);
 
@@ -203,71 +258,25 @@ float PistonController::calculatePID(float error) {
 }
 
 void PistonController::setValveState(ValveState state) {
-    if (state != _currentState) {
-        switch (state) {
-            case EXTEND:
-                digitalWrite(_valvePin1, HIGH);
-                digitalWrite(_valvePin2, LOW);
-                debugPrintf("Valve state changed to: EXTEND\n");
-                break;
-            case RETRACT:
-                digitalWrite(_valvePin1, LOW);
-                digitalWrite(_valvePin2, HIGH);
-                debugPrintf("Valve state changed to: RETRACT\n");
-                break;
-            case HOLD:
-                digitalWrite(_valvePin1, LOW);
-                digitalWrite(_valvePin2, LOW);
-                debugPrintf("Valve state changed to: HOLD\n");
-                break;
-        }
-        _currentState = state;
+    if (state == _currentValveState)
+        return;
+
+    _currentValveState = state;
+    switch (state) {
+        case EXTEND:
+            digitalWrite(_valvePin1, HIGH);
+            digitalWrite(_valvePin2, LOW);
+            debugPrintf("Valve state changed to: EXTEND\n");
+            break;
+        case RETRACT:
+            digitalWrite(_valvePin1, LOW);
+            digitalWrite(_valvePin2, HIGH);
+            debugPrintf("Valve state changed to: RETRACT\n");
+            break;
+        case HOLD:
+            digitalWrite(_valvePin1, LOW);
+            digitalWrite(_valvePin2, LOW);
+            debugPrintf("Valve state changed to: HOLD\n");
+            break;
     }
-}
-
-void PistonController::jogExtend() {
-    _isJogging = true;
-    setValveState(EXTEND);
-    debugPrintf("Jogging extend.\n");
-}
-
-void PistonController::jogRetract() {
-    _isJogging = true;
-    setValveState(RETRACT);
-    debugPrintf("Jogging retract.\n");
-}
-
-void PistonController::stopJog() {
-    if (_isJogging) {
-        _isJogging = false;
-        setValveState(HOLD);
-        debugPrintf("Jog stopped at position: %ld\n", _currentPosition);
-    }
-}
-
-void PistonController::setPIDParameters(float kp, float ki, float kd) {
-    _kp = kp;
-    _ki = ki;
-    _kd = kd;
-    _integral = 0; // Reset integral term when parameters change
-
-    debugPrintf("PID parameters updated - Kp: %.2f, Ki: %.2f, Kd: %.2f\n", kp, ki, kd);
-}
-
-bool PistonController::isTargetReached() const {
-    if (_isJogging) {
-        return false;
-    }
-    bool reached = abs(_targetPosition - _currentPosition) <= _positionTolerance;
-    if (reached) {
-        debugPrintf("Target position reached: %ld\n");
-    }
-    return reached;
-}
-
-void PistonController::calibrate() {
-    _currentPosition = 0;
-    _targetPosition = 0;
-    _integral = 0;
-    debugPrintf("Position calibrated to zero at time: ", millis());
 }

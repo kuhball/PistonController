@@ -19,7 +19,10 @@ PistonController piston(
     ENCODER_PIN_B,
     DMX_RX,
     DMX_TX,
-    DMX_EN
+    DMX_EN,
+    1.2,   // P
+    0.1,   // I
+    0.05   // D
 );
 
 void setup() {
@@ -29,9 +32,6 @@ void setup() {
 
     // Initialize the controller with optimized PID values
     piston.setup();
-    piston.setPIDParameters(1.2, 0.1, 0.05);  // Adjust these values for your system
-
-    Serial.println("System initialized.");
 }
 
 void loop() {

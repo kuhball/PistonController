@@ -15,6 +15,33 @@
     #define debugPrintf(...)
 #endif
 
+#define DMX_CHAN_EXTEND 1
+#define DMX_CHAN_RETRACT 2
+#define DMX_CHAN_POS_MSB 3
+#define DMX_CHAN_POS_LSB 4
+#define DMX_CHAN_CTRL 5
+
+#define TIMEOUT_HOME_START 1000
+#define TIMEOUT_HOME_EXTEND 30000
+#define TIMEOUT_HOME_RETRACT 30000
+
+enum ValveState {
+    EXTEND,
+    RETRACT,
+    HOLD,
+    INVALID
+};
+
+enum PistonControllerState {
+    PISTON_CONTROLLER_INIT,
+    PISTON_CONTROLLER_HOME_START,
+    PISTON_CONTROLLER_HOME_EXTEND,
+    PISTON_CONTROLLER_HOME_RETRACT,
+    PISTON_CONTROLLER_HOMED,
+    PISTON_CONTROLLER_REHOME_START,
+    PISTON_CONTROLLER_INVALID
+};
+
 class PistonController {
 public:
     // Constructor
@@ -25,46 +52,18 @@ public:
         int encoderPinB,    // Encoder pin B
         int dmxPinRx,
         int dmxPinTx,
-        int dmxPinEn
+        int dmxPinEn,
+        float kp,
+        float ki,
+        float kd
     );
 
     // Initialize the controller
     void setup();
-
     void loop();
-
-    // Set target position in encoder counts
-    void setTargetPosition(long position);
-
-    // Get current position in encoder counts
-    long getCurrentPosition() const;
-
-    // Update control loop (call this in main loop)
-    void update();
-
-    void checkDmxSignal();
-
-    void dmxSwitch();
-
-    void dmxLinear();
-
-    // Set PID control parameters
-    void setPIDParameters(float kp, float ki, float kd);
 
     // Check if target position is reached (within tolerance)
     bool isTargetReached() const;
-
-    // Calibrate the position (set current position as zero)
-    void calibrate();
-
-    // Jogging functions
-    void jogExtend();
-    void jogRetract();
-    void stopJog();
-    bool isJogging() const { return _isJogging; }
-
-    // Find home position
-    bool findHome(unsigned long timeout = 30000);
 
 private:
     // Pins
@@ -76,40 +75,50 @@ private:
     const int _dmxPinTx;
     const int _dmxPinEn;
 
-    // Dmx variables
-    byte _data[DMX_PACKET_SIZE];
-    dmx_port_t _dmxPort;
+    // State
+    enum PistonControllerState _state;
+    void enterState(enum PistonControllerState state);
+
+    // DMX
+    byte _dmxData[DMX_PACKET_SIZE];       // Last received DMX frame
+    dmx_port_t _dmxPort;                  // Port id of the esp_dmx driver
+
+    void readDmx();                       // ~Read a DMX frame if available
+    void dmxLinear();                     // Set position from DMX
+
+    // Piston Valve
+    ValveState _currentValveState;        // Stores the current valve state
+    void setValveState(ValveState state); // Update the current valve state
 
     // Position variables
-    volatile long _currentPosition;
-    long _targetPosition;
-    const int _positionTolerance = 10; // encoder counts
-    volatile long _homeExtend;
-    volatile long _homeRetract;
-    volatile long _travelLength;
+    volatile long _currentPosition;       // Current position of encoder, updated by ISR
+    long _targetPosition;                 // TargetPosition
+    void setTargetPosition(long position);
+    const int _positionTolerance = 10;    // Encoder Counts
+
+    long _homeExtended;                   // Used during homing
+    long _homeRetracted;                  // Used during homing
+
+    volatile long _travelLength;          // Set after homing
+
+    // Update PID control loop
+    void runPID();
+    void resetPID();
 
     // Jogging variables
-    bool _isJogging = false;
+    bool _isJogging;
 
     // Control variables
-    float _kp = 1.0;
-    float _ki = 0.0;
-    float _kd = 0.0;
-    float _integral = 0.0;
-    float _lastError = 0.0;
-    unsigned long _lastTime = 0;
-
-    // Valve control states
-    enum ValveState {
-        EXTEND,
-        RETRACT,
-        HOLD
-    };
-    ValveState _currentState;
-
+    float _kp;
+    float _ki;
+    float _kd;
+    float _integral;
+    float _lastError;
+    unsigned long _lastTime;
+    unsigned long _lastStateChange;
     // Private methods
     void updateEncoder();
-    void setValveState(ValveState state);
+
     float calculatePID(float error);
 
     // ISR friend function for encoder
