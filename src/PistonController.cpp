@@ -85,7 +85,7 @@ void PistonController::enterState(enum PistonControllerState state)
         return;
     }
 
-    debugPrintf("State change %s -> %s", PistonControllerStateStr[_state],
+    debugPrintf("State change %s -> %s\n", PistonControllerStateStr[_state],
                 PistonControllerStateStr[state]);
 
     _state = state;
@@ -93,6 +93,14 @@ void PistonController::enterState(enum PistonControllerState state)
 }
 
 void PistonController::loop() {
+    static unsigned long lastLoopPrint = 0;
+    if (millis() - lastLoopPrint > 1000) {
+        debugPrintf("State = %s\, currentPosition = %ld\n",
+                    PistonControllerStateStr[_state],
+                    _currentPosition);
+        lastLoopPrint = millis();
+    }
+
     readDmx();
 
     if (_dmxData[DMX_CHAN_EXTEND] > 127) {
@@ -110,13 +118,13 @@ void PistonController::loop() {
     switch (_state) {
     case PISTON_CONTROLLER_INIT:
         setValveState(HOLD);
-        if (_dmxData[DMX_CHAN_CTRL] == 128) {
+        if (_dmxData[DMX_CHAN_CTRL] == 127) {
             enterState(PISTON_CONTROLLER_HOME_START);
         }
         break;
     case PISTON_CONTROLLER_HOME_START:
         setValveState(HOLD);
-        if (_dmxData[DMX_CHAN_CTRL] != 128) {
+        if (_dmxData[DMX_CHAN_CTRL] != 127) {
             enterState(PISTON_CONTROLLER_INIT);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
@@ -142,7 +150,7 @@ void PistonController::loop() {
         }
         break;
     case PISTON_CONTROLLER_HOMED:
-        if (_dmxData[DMX_CHAN_CTRL] == 128) {
+        if (_dmxData[DMX_CHAN_CTRL] == 127) {
             enterState(PISTON_CONTROLLER_REHOME_START);
         }
         dmxLinear();
@@ -150,7 +158,7 @@ void PistonController::loop() {
         break;
     case PISTON_CONTROLLER_REHOME_START:
         setValveState(HOLD);
-        if (_dmxData[DMX_CHAN_CTRL] != 128) {
+        if (_dmxData[DMX_CHAN_CTRL] != 127) {
             enterState(PISTON_CONTROLLER_HOMED);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
