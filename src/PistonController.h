@@ -49,9 +49,6 @@ public:
     // Set PID control parameters
     void setPIDParameters(float kp, float ki, float kd);
 
-    // Emergency stop
-    void emergencyStop();
-
     // Check if target position is reached (within tolerance)
     bool isTargetReached() const;
 
