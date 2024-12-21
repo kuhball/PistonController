@@ -165,19 +165,39 @@ void PistonController::loop() {
             enterState(PISTON_CONTROLLER_INIT);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
+            _homeStable = 0;
             enterState(PISTON_CONTROLLER_HOME_EXTEND);
         }
         break;
     case PISTON_CONTROLLER_HOME_EXTEND:
         setValveState(EXTEND);
-        if (millis() - _lastStateChange > TIMEOUT_HOME_EXTEND) {
+        if (millis() - _lastStateChange > MIN_TIME_HOME_EXTEND) {
+            if (_homeExtended == _currentPosition) {
+                _homeStable++;
+            } else {
+                _homeExtended = _currentPosition;
+                _homeStable = 0;
+            }
+        }
+        if (millis() - _lastStateChange > TIMEOUT_HOME_EXTEND
+            || _homeStable >= 30) {
             _homeExtended = _currentPosition;
+            _homeStable = 0;
             enterState(PISTON_CONTROLLER_HOME_RETRACT);
         }
         break;
     case PISTON_CONTROLLER_HOME_RETRACT:
         setValveState(RETRACT);
-        if (millis() - _lastStateChange > TIMEOUT_HOME_RETRACT) {
+        if (millis() - _lastStateChange > MIN_TIME_HOME_RETRACT) {
+            if (_homeRetracted == _currentPosition) {
+                _homeStable++;
+            } else {
+                _homeRetracted = _currentPosition;
+                _homeStable = 0;
+            }
+        }
+        if (millis() - _lastStateChange > TIMEOUT_HOME_RETRACT
+            || _homeStable >= 30) {
             _homeRetracted = _currentPosition;
             _travelLength = _homeExtended - _homeRetracted;
             _currentPosition = 0;
@@ -201,6 +221,7 @@ void PistonController::loop() {
             enterState(PISTON_CONTROLLER_HOMED);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
+            _homeStable = 0;
             enterState(PISTON_CONTROLLER_HOME_EXTEND);
         }
         break;

@@ -19,7 +19,9 @@
 #define DMX_CHAN_CTRL 5
 
 #define TIMEOUT_HOME_START 3000
-#define TIMEOUT_HOME_EXTEND 30000
+#define MIN_TIME_HOME_EXTEND 30000
+#define TIMEOUT_HOME_EXTEND 180000
+#define MIN_TIME_HOME_RETRACT 45000
 #define TIMEOUT_HOME_RETRACT 180000
 
 #define VALVE_DUTY_THRESHOLD 40
@@ -98,6 +100,8 @@ private:
 
     long _homeExtended;                   // Used during homing
     long _homeRetracted;                  // Used during homing
+    uint8_t _homeStable;                  // Used during homing to check if stable
+                                          // position is reached
 
     volatile long _travelLength;          // Set after homing
 
