@@ -135,7 +135,7 @@ void PistonController::enterState(enum PistonControllerState state)
 
 void PistonController::loop() {
     static unsigned long lastLoopPrint = 0;
-    if (millis() - lastLoopPrint > 1000) {
+    if (0 && millis() - lastLoopPrint > 1000) {
         debugPrintf("State = %s\, currentPosition = %ld\n",
                     PistonControllerStateStr[_state],
                     _currentPosition);
@@ -282,7 +282,6 @@ void PistonController::resetPID() {
 void PistonController::setTargetPosition(long position) {
     if (_targetPosition == position) {
         if (_isJogging) {
-            //resetPID();
             _isJogging = false;
         }
         return;
@@ -313,7 +312,33 @@ void PistonController::runPID() {
 
     float error = _targetPosition - _currentPosition;
 
-    float output = calculatePID(error);
+    unsigned long currentTime = millis();
+    float deltaTime = (currentTime - _lastTime) / 1000.0;
+
+    // Calculate PID terms
+    float proportional = _kp * error;
+
+    if (abs(proportional) > 100) {
+        _integral = 0;
+    } else {
+        _integral += _ki * error * deltaTime;
+    }
+
+    if (proportional + _integral > 100) {
+        _integral = 100 - proportional;
+    }
+
+    if (proportional + _integral < -100) {
+        _integral = -100 - proportional;
+    }
+    
+    float derivative = _kd * (error - _lastError) / deltaTime;
+    
+    // Update state variables
+    _lastError = error;
+    _lastTime = currentTime;
+
+    float output = proportional + _integral + derivative; 
 
     // Determine valve state based on PID output
     if (abs(error) <= _positionTolerance) {
@@ -338,8 +363,8 @@ void PistonController::runPID() {
         }
     }
 
-    debugPrintf("%ld Position: %ld, Target: %ld, Error: %.2f, Output: %.2f Duty1: %u Duty2: %u\n",
-                millis(), _currentPosition, _targetPosition, error, output, _dutyCycle1, _dutyCycle2);
+    debugPrintf("Position: %ld, Target: %ld, Error: %.2f, Proportional: %.2f Integral: %.2f Derivative: %.2f Output: %.2f Duty1: %u Duty2: %u\n",
+                _currentPosition, _targetPosition, error, proportional, _integral, derivative, output, _dutyCycle1, _dutyCycle2);
 }
 
 float PistonController::calculatePID(float error) {

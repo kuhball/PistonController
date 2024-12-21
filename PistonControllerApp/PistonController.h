@@ -118,8 +118,8 @@ private:
 
     // Control variables
     float _kp = 0.5;
-    float _ki = 0.00;
-    float _kd = 0.00;
+    float _ki = 0.0;
+    float _kd = 0.01;
     float _integral;
     float _lastError;
     unsigned long _lastTime;
