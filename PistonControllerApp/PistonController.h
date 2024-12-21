@@ -12,11 +12,13 @@
     #define debugPrintf(...)
 #endif
 
-#define DMX_CHAN_EXTEND 1
-#define DMX_CHAN_RETRACT 2
-#define DMX_CHAN_POS_MSB 3
-#define DMX_CHAN_POS_LSB 4
-#define DMX_CHAN_CTRL 5
+#define DMX_BASE 501
+
+#define DMX_CHAN_EXTEND DMX_BASE + 0
+#define DMX_CHAN_RETRACT DMX_BASE + 1
+#define DMX_CHAN_POS_MSB DMX_BASE + 2
+#define DMX_CHAN_POS_LSB DMX_BASE + 3
+#define DMX_CHAN_CTRL DMX_BASE + 4
 
 #define TIMEOUT_HOME_START 3000
 #define MIN_TIME_HOME_EXTEND 30000
