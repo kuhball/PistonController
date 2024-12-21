@@ -19,10 +19,7 @@ PistonController piston(
     ENCODER_PIN_B,
     DMX_RX,
     DMX_TX,
-    DMX_EN,
-    1.2,   // P
-    0.1,   // I
-    0.05   // D
+    DMX_EN
 );
 
 void setup() {

@@ -25,6 +25,8 @@
 #define TIMEOUT_HOME_EXTEND 30000
 #define TIMEOUT_HOME_RETRACT 180000
 
+#define VALVE_DUTY_THRESHOLD 40
+
 enum ValveState {
     EXTEND,
     RETRACT,
@@ -52,17 +54,14 @@ public:
         int encoderPinB,    // Encoder pin B
         int dmxPinRx,
         int dmxPinTx,
-        int dmxPinEn,
-        float kp,
-        float ki,
-        float kd
+        int dmxPinEn
     );
 
     // Initialize the controller
     void setup();
     void loop();
 
-    void pwm();
+    void tick();
 private:
     // Pins
     const int _valvePin1;
@@ -98,7 +97,7 @@ private:
     volatile long _currentPosition;       // Current position of encoder, updated by ISR
     long _targetPosition;                 // TargetPosition
     void setTargetPosition(long position);
-    const int _positionTolerance = 10;     // Encoder Counts
+    const int _positionTolerance = 0;     // Encoder Counts
 
     long _homeExtended;                   // Used during homing
     long _homeRetracted;                  // Used during homing
@@ -114,9 +113,9 @@ private:
     bool _isJogging;
 
     // Control variables
-    float _kp;
-    float _ki;
-    float _kd;
+    float _kp = 0.12;
+    float _ki = 0.00;
+    float _kd = 0.00;
     float _integral;
     float _lastError;
     unsigned long _lastTime;

@@ -11,10 +11,10 @@ PistonController *controller = NULL;
 // ISR for timer
 void IRAM_ATTR timerISR(void)
 {
-    controller->pwm();
+    controller->tick();
 }
 
-void PistonController::pwm()
+void PistonController::tick()
 {
     static uint8_t pwm_counter = 0;
 
@@ -41,10 +41,7 @@ PistonController::PistonController(
     int encoderPinB,
     int dmxPinRx,
     int dmxPinTx,
-    int dmxPinEn,
-    float kp,
-    float ki,
-    float kd
+    int dmxPinEn
 )
     : _valvePin1(valvePin1)
     , _valvePin2(valvePin2)
@@ -53,9 +50,6 @@ PistonController::PistonController(
     , _dmxPinRx(dmxPinRx)
     , _dmxPinTx(dmxPinTx)
     , _dmxPinEn(dmxPinEn)
-    , _kp(kp)
-    , _ki(ki)
-    , _kd(kd)
 
     , _state(PISTON_CONTROLLER_INVALID)
     , _dmxPort(DMX_NUM_1)
@@ -98,7 +92,7 @@ void PistonController::setup() {
     controller = this;
     _timer = timerBegin(0, 80, true);
     timerAttachInterrupt(_timer, timerISR, true);
-    timerAlarmWrite(_timer, 1000, true);
+    timerAlarmWrite(_timer, 250, true);
     timerAlarmEnable(_timer);
 
     // Simulate homed state for rapid development
@@ -187,6 +181,7 @@ void PistonController::loop() {
             debugPrintf("Homing complete. Travel length %ld\n", _travelLength);
             enterState(PISTON_CONTROLLER_HOMED);
             _isJogging = true; // Reset PID on entering homed state
+            resetPID();
         }
         break;
     case PISTON_CONTROLLER_HOMED:
@@ -194,8 +189,8 @@ void PistonController::loop() {
             enterState(PISTON_CONTROLLER_REHOME_START);
         }
         dmxLinear();
-        runSimple();
-        //runPID();
+        //runSimple();
+        runPID();
         break;
     case PISTON_CONTROLLER_REHOME_START:
         setValveState(HOLD);
@@ -248,21 +243,22 @@ void PistonController::updateEncoder() {
 void PistonController::resetPID() {
     debugPrintf("Resetting PID...");
     _integral = 0; // Reset integral term when target changes
+    _lastError = 0;
     _lastTime = millis();
 }
 
 void PistonController::setTargetPosition(long position) {
     if (_targetPosition == position) {
         if (_isJogging) {
-            resetPID();
+            //resetPID();
             _isJogging = false;
         }
         return;
     }
 
     _targetPosition = position;
-    resetPID();
-    debugPrintf("New target position set: %ld, Current Position: %ld\n", position, _currentPosition);
+    //resetPID();
+    //debugPrintf("New target position set: %ld, Current Position: %ld\n", position, _currentPosition);
 }
 
 void PistonController::runSimple() {
@@ -279,23 +275,40 @@ void PistonController::runSimple() {
 
 void PistonController::runPID() {
     float error = _targetPosition - _currentPosition;
-    float output = calculatePID(error);
+    error /= 200;
 
-    static unsigned long lastDebugPrint = 0;
-    if (millis() - lastDebugPrint > 500) {
-        debugPrintf("Position: %ld, Target: %ld, Error: %.2f, Output: %.2f\n",
-                    _currentPosition, _targetPosition, error, output);
-        lastDebugPrint = millis();
-    }
+    float output = calculatePID(error);
 
     // Determine valve state based on PID output
     if (abs(error) <= _positionTolerance) {
         setValveState(HOLD);
     } else if (output > 0) {
-        setValveState(EXTEND);
+        _dutyCycle2 = 0;
+        if (output > 1) {
+            _dutyCycle1 = 255;
+        } else {
+            _dutyCycle1 = 255 * output;
+            if (_dutyCycle1 < VALVE_DUTY_THRESHOLD)
+                _dutyCycle1 = 0;
+        }
     } else {
-        setValveState(RETRACT);
+        _dutyCycle1 = 0;
+        if (output < -1.0) {
+            _dutyCycle2 = 255;
+        } else {
+            _dutyCycle2 = abs(output) * 255;
+            if (_dutyCycle2 < VALVE_DUTY_THRESHOLD)
+                _dutyCycle2 = 0;
+        }
     }
+
+    static unsigned long lastDebugPrint = 0;
+    if (millis() - lastDebugPrint > 500) {
+        debugPrintf("Position: %ld, Target: %ld, Error: %.2f, Output: %.2f Duty1: %u Duty2: %u\n",
+                    _currentPosition, _targetPosition, error, output, _dutyCycle1, _dutyCycle2);
+        lastDebugPrint = millis();
+    }
+
 }
 
 float PistonController::calculatePID(float error) {
