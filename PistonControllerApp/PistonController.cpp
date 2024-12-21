@@ -211,9 +211,13 @@ void PistonController::loop() {
         if (_dmxData[DMX_CHAN_CTRL] == 127) {
             enterState(PISTON_CONTROLLER_REHOME_START);
         }
-        dmxLinear();
-        //runSimple();
-        runPID();
+        if (_dmxData[DMX_CHAN_CTRL] == 63) {
+            dmxLinear();
+            //runSimple();
+            runPID();
+        } else {
+            setValveState(HOLD);
+        }
         break;
     case PISTON_CONTROLLER_REHOME_START:
         setValveState(HOLD);
