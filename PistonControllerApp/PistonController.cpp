@@ -35,10 +35,6 @@ void PistonController::tick()
     if (pwm_counter < _dutyCycle2) {
         digitalWrite(_valvePin2, HIGH);
     }
-
-    if (pwm_counter == 0xff) {
-        _runPID = true;
-    }
 }
 
 PistonController::PistonController(
@@ -99,13 +95,13 @@ void PistonController::setup() {
     controller = this;
     _timer = timerBegin(0, 80, true);
     timerAttachInterrupt(_timer, timerISR, true);
-    timerAlarmWrite(_timer, 392, true);
+    timerAlarmWrite(_timer, 250, true);
     timerAlarmEnable(_timer);
 
     // Simulate homed state for rapid development
-    enterState(PISTON_CONTROLLER_HOMED);
-    _travelLength = 41277;
-    _currentPosition = 41277;
+    // enterState(PISTON_CONTROLLER_HOMED);
+    // _travelLength = 41277;
+    // _currentPosition = 41277;
 }
 
 static const char *PistonControllerStateStr[] = {
@@ -135,7 +131,7 @@ void PistonController::enterState(enum PistonControllerState state)
 
 void PistonController::loop() {
     static unsigned long lastLoopPrint = 0;
-    if (0 && millis() - lastLoopPrint > 1000) {
+    if (millis() - lastLoopPrint > 1000) {
         debugPrintf("State = %s\, currentPosition = %ld\n",
                     PistonControllerStateStr[_state],
                     _currentPosition);
@@ -282,6 +278,7 @@ void PistonController::resetPID() {
 void PistonController::setTargetPosition(long position) {
     if (_targetPosition == position) {
         if (_isJogging) {
+            //resetPID();
             _isJogging = false;
         }
         return;
@@ -305,66 +302,41 @@ void PistonController::runSimple() {
 }
 
 void PistonController::runPID() {
-    if (!_runPID)
-        return;
-
-    _runPID = false;
-
     float error = _targetPosition - _currentPosition;
+    error /= 200;
 
-    unsigned long currentTime = millis();
-    float deltaTime = (currentTime - _lastTime) / 1000.0;
-
-    // Calculate PID terms
-    float proportional = _kp * error;
-
-    if (abs(proportional) > 100) {
-        _integral = 0;
-    } else {
-        _integral += _ki * error * deltaTime;
-    }
-
-    if (proportional + _integral > 100) {
-        _integral = 100 - proportional;
-    }
-
-    if (proportional + _integral < -100) {
-        _integral = -100 - proportional;
-    }
-    
-    float derivative = _kd * (error - _lastError) / deltaTime;
-    
-    // Update state variables
-    _lastError = error;
-    _lastTime = currentTime;
-
-    float output = proportional + _integral + derivative; 
+    float output = calculatePID(error);
 
     // Determine valve state based on PID output
     if (abs(error) <= _positionTolerance) {
         setValveState(HOLD);
     } else if (output > 0) {
         _dutyCycle2 = 0;
-        if (output > 100) {
+        if (output > 1) {
             _dutyCycle1 = 255;
         } else {
-            _dutyCycle1 = 2.55 * output;
+            _dutyCycle1 = 255 * output;
             if (_dutyCycle1 < VALVE_DUTY_THRESHOLD)
                 _dutyCycle1 = 0;
         }
     } else {
         _dutyCycle1 = 0;
-        if (output < -100.0) {
+        if (output < -1.0) {
             _dutyCycle2 = 255;
         } else {
-            _dutyCycle2 = abs(output) * 2.55;
+            _dutyCycle2 = abs(output) * 255;
             if (_dutyCycle2 < VALVE_DUTY_THRESHOLD)
                 _dutyCycle2 = 0;
         }
     }
 
-    debugPrintf("Position: %ld, Target: %ld, Error: %.2f, Proportional: %.2f Integral: %.2f Derivative: %.2f Output: %.2f Duty1: %u Duty2: %u\n",
-                _currentPosition, _targetPosition, error, proportional, _integral, derivative, output, _dutyCycle1, _dutyCycle2);
+    static unsigned long lastDebugPrint = 0;
+    if (millis() - lastDebugPrint > 500) {
+        debugPrintf("Position: %ld, Target: %ld, Error: %.2f, Output: %.2f Duty1: %u Duty2: %u\n",
+                    _currentPosition, _targetPosition, error, output, _dutyCycle1, _dutyCycle2);
+        lastDebugPrint = millis();
+    }
+
 }
 
 float PistonController::calculatePID(float error) {

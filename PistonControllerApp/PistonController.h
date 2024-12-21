@@ -26,7 +26,7 @@
 #define MIN_TIME_HOME_RETRACT 45000
 #define TIMEOUT_HOME_RETRACT 180000
 
-#define VALVE_DUTY_THRESHOLD 20
+#define VALVE_DUTY_THRESHOLD 40
 
 enum ValveState {
     EXTEND,
@@ -108,7 +108,6 @@ private:
     volatile long _travelLength;          // Set after homing
 
     // Update PID control loop
-    volatile bool _runPID;
     void runPID();
     void runSimple();
     void resetPID();
@@ -117,9 +116,9 @@ private:
     bool _isJogging;
 
     // Control variables
-    float _kp = 0.5;
-    float _ki = 0.0;
-    float _kd = 0.01;
+    float _kp = 0.12;
+    float _ki = 0.00;
+    float _kd = 0.00;
     float _integral;
     float _lastError;
     unsigned long _lastTime;
