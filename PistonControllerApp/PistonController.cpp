@@ -1,3 +1,6 @@
+#include <Arduino.h>
+#include <esp_dmx.h>
+
 #include "PistonController.h"
 
 // ISR for encoder

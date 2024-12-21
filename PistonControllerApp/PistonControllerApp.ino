@@ -1,6 +1,7 @@
-#include <PistonController.h>
-#include <esp_dmx.h>
 #include <Arduino.h>
+#include <esp_dmx.h>
+
+#include "PistonController.h"
 
 // Pin definitions
 const int VALVE_PIN_EXTEND  = 25;  // ESP32 GPIO pin for valve direction 1

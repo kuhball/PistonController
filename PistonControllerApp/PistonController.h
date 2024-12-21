@@ -1,9 +1,6 @@
 #ifndef PISTON_CONTROLLER_H
 #define PISTON_CONTROLLER_H
 
-#include <Arduino.h>
-#include <esp_dmx.h>
-
 // Debug configuration
 #ifndef PISTON_DEBUG
 #define PISTON_DEBUG 1  // Set to 0 to disable debug prints
