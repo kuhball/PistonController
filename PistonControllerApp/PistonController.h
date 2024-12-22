@@ -22,9 +22,13 @@
 
 #define TIMEOUT_HOME_START 3000
 #define MIN_TIME_HOME_EXTEND 30000
-#define TIMEOUT_HOME_EXTEND 180000
+#define TIMEOUT_HOME_EXTEND 600000
 #define MIN_TIME_HOME_RETRACT 45000
-#define TIMEOUT_HOME_RETRACT 180000
+#define TIMEOUT_HOME_RETRACT 600000
+
+#define MIN_DISTANCE_HOMING 200
+#define THRESHOLD_STABLE 25
+#define TIMEOUT_STABLE 5000
 
 #define VALVE_DUTY_THRESHOLD 40
 
@@ -102,7 +106,7 @@ private:
 
     long _homeExtended;                   // Used during homing
     long _homeRetracted;                  // Used during homing
-    uint8_t _homeStable;                  // Used during homing to check if stable
+    unsigned long _homeStable;            // Used during homing to check if stable
                                           // position is reached
 
     volatile long _travelLength;          // Set after homing
