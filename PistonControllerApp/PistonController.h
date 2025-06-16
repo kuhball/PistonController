@@ -12,13 +12,11 @@
     #define debugPrintf(...)
 #endif
 
-#define DMX_BASE 501
-
-#define DMX_CHAN_EXTEND DMX_BASE + 0
-#define DMX_CHAN_RETRACT DMX_BASE + 1
-#define DMX_CHAN_POS_MSB DMX_BASE + 2
-#define DMX_CHAN_POS_LSB DMX_BASE + 3
-#define DMX_CHAN_CTRL DMX_BASE + 4
+#define DMX_CHAN_EXTEND 0
+#define DMX_CHAN_RETRACT 1
+#define DMX_CHAN_POS_MSB 2
+#define DMX_CHAN_POS_LSB 3
+#define DMX_CHAN_CTRL 4
 
 #define TIMEOUT_HOME_START 3000
 #define MIN_TIME_HOME_EXTEND 30000
@@ -84,6 +82,7 @@ private:
     // DMX
     byte _dmxData[DMX_PACKET_SIZE];       // Last received DMX frame
     dmx_port_t _dmxPort;                  // Port id of the esp_dmx driver
+    uint16_t _dmx_start_address;
 
     void readDmx();                       // ~Read a DMX frame if available
     void dmxLinear();                     // Set position from DMX
