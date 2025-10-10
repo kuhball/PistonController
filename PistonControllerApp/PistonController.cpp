@@ -99,10 +99,10 @@ void PistonController::setup() {
 
     // Setup Timer
     controller = this;
-    _timer = timerBegin(80);
-    timerAttachInterrupt(_timer, timerISR);
-    timerAlarm(_timer, 250, true, 0);
-    timerStart(_timer);
+    _timer = timerBegin(0, 80, true);
+    timerAttachInterrupt(_timer, timerISR, true);
+    timerAlarmWrite(_timer, 250, true);
+    timerAlarmEnable(_timer);
 
     // Simulate homed state for rapid development
     // enterState(PISTON_CONTROLLER_HOMED);
