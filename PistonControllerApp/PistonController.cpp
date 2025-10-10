@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <esp_dmx.h>
+#include <rdm/responder.h>
 
 #include "PistonController.h"
 
@@ -79,13 +80,18 @@ void PistonController::setup() {
     attachInterruptArg(digitalPinToInterrupt(_encoderPinB), encoderISR, this, CHANGE);
 
     // Setup Dmx
-    dmx_config_t config = DMX_CONFIG_DEFAULT; // TODO: Include build version here for RDM
+    dmx_config_t config = DMX_CONFIG_DEFAULT;
     dmx_personality_t personalities[] = {
         {5, "Piston Controller"},
     };
     int personality_count = 1;
     dmx_driver_install(_dmxPort, &config, personalities, personality_count);
     dmx_set_pin(_dmxPort, _dmxPinTx, _dmxPinRx, _dmxPinEn);
+    if (rdm_get_dmx_start_address(_dmxPort, &_dmx_start_address) == 0) {
+        printf("An error occurred getting the DMX start address.\n");
+    }
+    debugPrintf("Current dmx address is %d\n", _dmx_start_address);
+    rdm_set_device_label(_dmxPort, "dichtcrew robot", 15);
 
     enterState(PISTON_CONTROLLER_INIT);
     debugPrintf("PistonController initialized. Encoder pins: %d, %d\n",
@@ -130,23 +136,23 @@ void PistonController::enterState(enum PistonControllerState state)
 }
 
 void PistonController::loop() {
+    readDmx();
+
     static unsigned long lastLoopPrint = 0;
     if (millis() - lastLoopPrint > 1000) {
-        debugPrintf("State = %s\, currentPosition = %ld\n",
+        debugPrintf("State = %s\, currentPosition = %ld, currentAddress = %d\n",
                     PistonControllerStateStr[_state],
-                    _currentPosition);
+                    _currentPosition, _dmx_start_address);
         lastLoopPrint = millis();
     }
 
-    readDmx();
-
-    if (_dmxData[DMX_CHAN_EXTEND] > 127) {
+    if (_dmxData[_dmx_start_address + DMX_CHAN_EXTEND] > 127) {
         _isJogging = true;
         setValveState(EXTEND);
         return;
     }
 
-    if (_dmxData[DMX_CHAN_RETRACT] > 127) {
+    if (_dmxData[_dmx_start_address + DMX_CHAN_RETRACT] > 127) {
         _isJogging = true;
         setValveState(RETRACT);
         return;
@@ -155,13 +161,13 @@ void PistonController::loop() {
     switch (_state) {
     case PISTON_CONTROLLER_INIT:
         setValveState(HOLD);
-        if (_dmxData[DMX_CHAN_CTRL] == 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == 127) {
             enterState(PISTON_CONTROLLER_HOME_START);
         }
         break;
     case PISTON_CONTROLLER_HOME_START:
         setValveState(HOLD);
-        if (_dmxData[DMX_CHAN_CTRL] != 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != 127) {
             enterState(PISTON_CONTROLLER_INIT);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
@@ -218,10 +224,10 @@ void PistonController::loop() {
         }
         break;
     case PISTON_CONTROLLER_HOMED:
-        if (_dmxData[DMX_CHAN_CTRL] == 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == 127) {
             enterState(PISTON_CONTROLLER_REHOME_START);
         }
-        if (_dmxData[DMX_CHAN_CTRL] == 63) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == 63) {
             dmxLinear();
             //runSimple();
             runPID();
@@ -231,7 +237,7 @@ void PistonController::loop() {
         break;
     case PISTON_CONTROLLER_REHOME_START:
         setValveState(HOLD);
-        if (_dmxData[DMX_CHAN_CTRL] != 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != 127) {
             enterState(PISTON_CONTROLLER_HOMED);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
@@ -246,16 +252,24 @@ void PistonController::readDmx() {
     dmx_packet_t packet;
 
     if (dmx_receive(_dmxPort, &packet, DMX_TIMEOUT_TICK)) {
-        if (!packet.err) {
-            dmx_read(1, _dmxData, packet.size);
+        if (!packet.err){
+            if (packet.is_rdm) {
+                rdm_send_response(_dmxPort);
+            } else {
+                dmx_read(_dmxPort, _dmxData, packet.size);
+            }
         }
+    }
+
+    if (rdm_get_dmx_start_address(_dmxPort, &_dmx_start_address) == 0) {
+        printf("An error occurred getting the DMX start address.\n");
     }
 }
 
 void PistonController::dmxLinear()
 {
-    uint16_t dmxPosition = (_dmxData[DMX_CHAN_POS_MSB] << 8)
-                       | _dmxData[DMX_CHAN_POS_LSB];
+    uint16_t dmxPosition = (_dmxData[_dmx_start_address + DMX_CHAN_POS_MSB] << 8)
+                       | _dmxData[_dmx_start_address + DMX_CHAN_POS_LSB];
 
     // Beware of overflows
     uint64_t targetPosition = (65535 - dmxPosition);
