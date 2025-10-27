@@ -115,6 +115,7 @@ static const char *PistonControllerStateStr[] = {
     "HOME_START",
     "HOME_EXTEND",
     "HOME_RETRACT",
+    "HOME_REVERSE",
     "HOMED",
     "REHOME_START",
     "INVALID"
@@ -161,18 +162,31 @@ void PistonController::loop() {
     switch (_state) {
     case PISTON_CONTROLLER_INIT:
         setValveState(HOLD);
-        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == DMX_HOMING) {
             enterState(PISTON_CONTROLLER_HOME_START);
+        }
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == DMX_HOME_REVERSE) {
+            enterState(PISTON_CONTROLLER_HOME_REVERSE);
         }
         break;
     case PISTON_CONTROLLER_HOME_START:
         setValveState(HOLD);
-        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != DMX_HOMING) {
             enterState(PISTON_CONTROLLER_INIT);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
             _homeStable = millis();
             enterState(PISTON_CONTROLLER_HOME_EXTEND);
+        }
+        break;
+    case PISTON_CONTROLLER_HOME_REVERSE:
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != DMX_HOME_REVERSE) {
+            enterState(PISTON_CONTROLLER_INIT);
+        }
+        if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
+            _homeReverse = true;
+            debugPrintf("Home reverse set to %d\n", _homeReverse);
+            enterState(PISTON_CONTROLLER_INIT);
         }
         break;
     case PISTON_CONTROLLER_HOME_EXTEND:
@@ -224,10 +238,10 @@ void PistonController::loop() {
         }
         break;
     case PISTON_CONTROLLER_HOMED:
-        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == DMX_HOMING) {
             enterState(PISTON_CONTROLLER_REHOME_START);
         }
-        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == 63) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] == DMX_POSITION_CTRL) {
             dmxLinear();
             //runSimple();
             runPID();
@@ -237,7 +251,7 @@ void PistonController::loop() {
         break;
     case PISTON_CONTROLLER_REHOME_START:
         setValveState(HOLD);
-        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != 127) {
+        if (_dmxData[_dmx_start_address + DMX_CHAN_CTRL] != DMX_HOMING) {
             enterState(PISTON_CONTROLLER_HOMED);
         }
         if (millis() - _lastStateChange > TIMEOUT_HOME_START) {
@@ -285,8 +299,10 @@ void PistonController::updateEncoder() {
     static uint8_t oldAB = 0;
     uint8_t newAB = (digitalRead(_encoderPinA) << 1) | digitalRead(_encoderPinB);
 
-    // Lookup table for encoder state changes
-    static const int8_t lookup[16] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0};
+    static const int8_t fwd[16] = {0,-1, 1, 0, 1, 0, 0,-1,-1, 0, 0, 1, 0, 1,-1, 0};
+    static const int8_t rev[16] = {0, 1,-1, 0,-1, 0, 0, 1, 1, 0, 0,-1, 0,-1, 1, 0};
+
+    const int8_t *lookup = _homeReverse ? rev : fwd;   // choose table
 
     oldAB = ((oldAB << 2) | newAB) & 0x0F;
     _currentPosition += lookup[oldAB];

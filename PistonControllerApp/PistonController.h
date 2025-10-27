@@ -17,9 +17,12 @@
 #define DMX_CHAN_POS_MSB 2
 #define DMX_CHAN_POS_LSB 3
 #define DMX_CHAN_CTRL 4
+#define DMX_POSITION_CTRL 63
+#define DMX_HOMING 127
+#define DMX_HOME_REVERSE 192
 
 #define TIMEOUT_HOME_START 3000
-#define MIN_TIME_HOME_EXTEND 60000
+#define MIN_TIME_HOME_EXTEND 180000
 #define TIMEOUT_HOME_EXTEND 600000
 #define MIN_TIME_HOME_RETRACT 45000
 #define TIMEOUT_HOME_RETRACT 600000
@@ -42,6 +45,7 @@ enum PistonControllerState {
     PISTON_CONTROLLER_HOME_START,
     PISTON_CONTROLLER_HOME_EXTEND,
     PISTON_CONTROLLER_HOME_RETRACT,
+    PISTON_CONTROLLER_HOME_REVERSE,
     PISTON_CONTROLLER_HOMED,
     PISTON_CONTROLLER_REHOME_START,
     PISTON_CONTROLLER_INVALID
@@ -107,6 +111,7 @@ private:
     long _homeRetracted;                  // Used during homing
     unsigned long _homeStable;            // Used during homing to check if stable
                                           // position is reached
+    bool _homeReverse = false;            // set if the sensor is mounted upside down
 
     volatile long _travelLength;          // Set after homing
 
